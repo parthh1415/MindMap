@@ -8,6 +8,13 @@ const config: UserConfig & { test?: unknown } = {
     alias: {
       "@": path.resolve(__dirname, "src"),
       "@shared": path.resolve(__dirname, "..", "shared"),
+      "@mindmap/transcript-client": path.resolve(
+        __dirname,
+        "..",
+        "transcript",
+        "client",
+        "index.ts",
+      ),
     },
   },
   server: {

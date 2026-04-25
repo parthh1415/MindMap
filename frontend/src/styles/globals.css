@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "./tokens.css";
 
 /* ─────────── Reset ─────────── */
@@ -21,8 +21,8 @@ body {
   background-color: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: var(--font-size-base);
-  line-height: var(--line-height-normal);
+  font-size: var(--fs-base);
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "tnum" 1, "ss01" 1;
@@ -33,7 +33,7 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.01em;
-  line-height: var(--line-height-tight);
+  line-height: 1.1;
 }
 
 button {
@@ -63,32 +63,33 @@ a {
   text-decoration: none;
 }
 
-/* tabular numerals on the scrubber */
 .tabular {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
 
+.font-display { font-family: var(--font-display); }
+.font-body    { font-family: var(--font-body); }
+.font-mono    { font-family: var(--font-mono); }
+
 /* ─────────── Custom scrollbar ─────────── */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: var(--bg-base);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: var(--radius-pill);
-  border: 2px solid var(--bg-base);
+  background: var(--border-default);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-default);
+  background: var(--signature-accent-soft);
 }
-
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) var(--bg-base);
+  scrollbar-color: var(--border-default) var(--bg-base);
 }
 
 /* ─────────── Focus ring ─────────── */
@@ -119,38 +120,38 @@ a {
   background: var(--bg-base);
 }
 
-/* slow ambient gradient drift for the app background */
+/* Subtle ambient gradient drift, signature-accent tinted */
 .ambient-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(ellipse 60% 50% at 20% 30%, rgba(34, 211, 238, 0.08), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 80% 70%, rgba(167, 139, 250, 0.07), transparent 60%),
-    radial-gradient(ellipse 40% 50% at 50% 90%, rgba(244, 114, 182, 0.05), transparent 60%);
+    radial-gradient(ellipse 60% 50% at 18% 28%, rgba(214, 255, 58, 0.05), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 82% 72%, rgba(77, 198, 232, 0.04), transparent 60%),
+    radial-gradient(ellipse 45% 50% at 50% 95%, rgba(181, 140, 255, 0.04), transparent 60%);
   filter: blur(40px);
-  animation: ambient-drift 30s ease-in-out infinite alternate;
+  animation: ambient-drift 32s ease-in-out infinite alternate;
   pointer-events: none;
 }
 
 @keyframes ambient-drift {
   0%   { transform: translate3d(0, 0, 0) scale(1);   }
-  50%  { transform: translate3d(2%, -1%, 0) scale(1.06); }
-  100% { transform: translate3d(-2%, 1%, 0) scale(1); }
+  50%  { transform: translate3d(1.5%, -1%, 0) scale(1.05); }
+  100% { transform: translate3d(-1.5%, 1%, 0) scale(1); }
 }
 
-/* dot grid background for the canvas */
+/* Dot grid for the canvas */
 .dot-grid {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(148, 163, 184, 0.10) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px);
   background-size: 22px 22px;
   background-position: 0 0;
   pointer-events: none;
   z-index: 1;
 }
 
-/* ─────────── Reactflow overrides (scoped) ─────────── */
+/* ─────────── Reactflow overrides ─────────── */
 .react-flow__renderer,
 .react-flow__pane {
   background: transparent !important;
@@ -162,7 +163,7 @@ a {
   background: var(--bg-raised) !important;
   border: 1px solid var(--border-subtle) !important;
   border-radius: var(--radius-md) !important;
-  box-shadow: var(--elev-2) !important;
+  box-shadow: var(--shadow-md) !important;
 }
 .react-flow__controls-button {
   background: transparent !important;
@@ -171,20 +172,20 @@ a {
 }
 .react-flow__controls-button:hover {
   background: var(--bg-overlay) !important;
-  color: var(--text-primary) !important;
+  color: var(--signature-accent) !important;
 }
 
-/* ─────────── Sonner overrides (toast styling via tokens) ─────────── */
+/* ─────────── Sonner overrides ─────────── */
 [data-sonner-toaster] [data-sonner-toast] {
   background: var(--bg-raised) !important;
   border: 1px solid var(--border-subtle) !important;
   color: var(--text-primary) !important;
-  box-shadow: var(--elev-3) !important;
+  box-shadow: var(--shadow-md) !important;
   font-family: var(--font-body) !important;
 }
 [data-sonner-toaster] [data-sonner-toast][data-type="error"] {
-  border-color: var(--destructive) !important;
+  border-color: var(--color-danger) !important;
 }
 [data-sonner-toaster] [data-sonner-toast][data-type="success"] {
-  border-color: var(--success) !important;
+  border-color: var(--color-success) !important;
 }

@@ -8,11 +8,13 @@ Seed: TOPOLOGY_AGENT_SEED (optional; uagents will derive a deterministic id)
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 
 # sys.path tweak so `from shared.agent_messages import ...` works when running
@@ -40,6 +42,8 @@ logger = logging.getLogger("agents.topology")
 
 PORT = int(os.getenv("TOPOLOGY_AGENT_PORT", "8001"))
 SEED = os.getenv("TOPOLOGY_AGENT_SEED") or "mindmap-topology-default-seed"
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_DIFF_ENDPOINT = f"{BACKEND_URL.rstrip('/')}/internal/topology-diff"
 
 agent = Agent(
     name="mindmap_topology",
@@ -77,7 +81,20 @@ async def _handle_topology(ctx: Context, sender: str, msg: TopologyRequest) -> N
             merges=[],
             edge_updates=[],
         )
+    # Native uagents return path (works only when sender is also a uagent that
+    # has registered a TopologyDiff @on_message handler).
     await ctx.send(sender, diff)
+
+    # Backend HTTP fallback. The backend exposes POST /internal/topology-diff
+    # as the supported close-the-loop path because it is not itself a uagent
+    # with a TopologyDiff handler. This is the path the live mic flow uses:
+    # backend → topology agent (via uagents send) → Groq → BACK to backend
+    # over HTTP → broadcast to /ws/graph subscribers.
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(BACKEND_DIFF_ENDPOINT, json=json.loads(diff.model_dump_json()))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Backend diff POST failed (%s): %s", BACKEND_DIFF_ENDPOINT, exc)
 
 
 if __name__ == "__main__":

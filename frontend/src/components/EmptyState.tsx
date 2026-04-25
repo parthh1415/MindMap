@@ -1,95 +1,123 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Mic } from "lucide-react";
 
 /**
- * Shown when a session has zero nodes.
+ * First-run hero, shown when the live graph has zero nodes and zero
+ * ghosts. Communicates "speak and the map appears" with the quiet
+ * authority of a developer-tool surface — Phosphor Dark canvas, volt
+ * accent, Space Grotesk display, no emoji, no AI-template language.
  *
- * Subtle ambient animation:
- *   - Slow gradient breathing on the headline plate
- *   - 12 small drifting particles
- *   - Microphone glyph with a faint pulsing glow
- *
- * Tone: "Start talking" — declarative, not cute. NO emoji.
+ * Composition (top to bottom, centered, ~600px max-width):
+ *   - tiny wordmark with a phosphor-dot logomark
+ *   - the headline
+ *   - a single subhead
+ *   - a three-line "what to expect" list with accent-tinted bullets
+ *   - a soft pulsing waveform indicator (5 bars, staggered springs)
+ *   - keyboard hint chip
+ * Behind: a slow drift of dim accent-tinted dots.
  */
 export function EmptyState() {
-  const reduceMotion = useReducedMotion();
+  const reduce = useReducedMotion();
 
-  const particles = Array.from({ length: 12 }, (_, i) => i);
+  // 18 deterministic particles — coordinates from a small LCG so layout
+  // doesn't shift between renders.
+  const particles = Array.from({ length: 18 }, (_, i) => {
+    const a = (i * 9301 + 49297) % 233280;
+    const b = (i * 21034 + 7813) % 233280;
+    return {
+      i,
+      left: (a / 233280) * 100,
+      top: (b / 233280) * 100,
+      delay: (i * 0.41) % 4,
+      duration: 9 + (i % 5),
+      size: 2 + (i % 3),
+    };
+  });
+
+  const bars = [0, 1, 2, 3, 4];
 
   return (
-    <div className="empty-shell" role="status" aria-label="No nodes yet">
-      {/* drifting particles */}
-      <div className="empty-particles" aria-hidden>
-        {particles.map((i) => (
+    <div className="es-shell" role="status" aria-label="Waiting for speech">
+      <div className="es-particles" aria-hidden>
+        {particles.map((p) => (
           <motion.span
-            key={i}
-            className="empty-particle"
+            key={p.i}
+            className="es-particle"
             style={{
-              left: `${(i * 7919) % 100}%`,
-              top: `${(i * 6113) % 100}%`,
-              background:
-                i % 6 === 0
-                  ? "var(--speaker-1)"
-                  : i % 6 === 1
-                    ? "var(--speaker-2)"
-                    : i % 6 === 2
-                      ? "var(--speaker-3)"
-                      : i % 6 === 3
-                        ? "var(--speaker-4)"
-                        : i % 6 === 4
-                          ? "var(--speaker-5)"
-                          : "var(--speaker-6)",
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
             }}
             animate={
-              reduceMotion
+              reduce
                 ? undefined
                 : {
-                    y: [0, -20, 0],
-                    x: [0, (i % 2 === 0 ? 8 : -8), 0],
-                    opacity: [0.18, 0.5, 0.18],
+                    y: [0, -22, 0],
+                    opacity: [0.0, 0.55, 0.0],
                   }
             }
             transition={{
-              duration: 6 + (i % 4),
+              duration: p.duration,
               repeat: Infinity,
               ease: "easeInOut",
-              delay: (i * 0.4) % 3,
+              delay: p.delay,
             }}
           />
         ))}
       </div>
 
       <motion.div
-        className="empty-card"
-        animate={
-          reduceMotion
-            ? undefined
-            : {
-                boxShadow: [
-                  "0 0 32px rgba(34, 211, 238, 0.10)",
-                  "0 0 48px rgba(34, 211, 238, 0.18)",
-                  "0 0 32px rgba(34, 211, 238, 0.10)",
-                ],
-              }
-        }
-        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+        className="es-stack"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 180, damping: 24, delay: 0.05 }}
       >
-        <motion.div
-          className="empty-icon"
-          animate={reduceMotion ? undefined : { scale: [1, 1.06, 1] }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-        >
-          <Mic size={20} />
-        </motion.div>
-        <h2 className="empty-title">Start talking</h2>
-        <p className="empty-sub">
-          Speak naturally. Concepts will surface as ghosts and commit when the
-          conversation confirms them.
+        <div className="es-mark">
+          <span className="es-dot" aria-hidden />
+          <span className="es-wordmark">MINDMAP</span>
+        </div>
+
+        <h1 className="es-headline">Speak. The map appears.</h1>
+
+        <p className="es-sub">
+          A live mind-map builds itself from your conversation. There is no
+          end-of-session summary — the map is the summary.
         </p>
+
+        <ul className="es-list" role="list">
+          <li><span className="es-bullet" aria-hidden /> Ghost nodes drift in as you talk.</li>
+          <li><span className="es-bullet" aria-hidden /> The graph reorganizes around recurring topics.</li>
+          <li><span className="es-bullet" aria-hidden /> Scrub the timeline to revisit any moment.</li>
+        </ul>
+
+        <div className="es-meter" aria-hidden>
+          {bars.map((i) => (
+            <motion.span
+              key={i}
+              className="es-bar"
+              animate={
+                reduce
+                  ? { scaleY: 0.4 }
+                  : { scaleY: [0.25, 1, 0.4, 0.8, 0.25] }
+              }
+              transition={{
+                duration: 1.6,
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: i * 0.12,
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="es-hint">
+          <kbd>Click</kbd>
+          <span>the mic in the top bar to begin</span>
+        </div>
       </motion.div>
 
       <style>{`
-        .empty-shell {
+        .es-shell {
           position: absolute;
           inset: 0;
           display: grid;
@@ -97,54 +125,125 @@ export function EmptyState() {
           z-index: 2;
           pointer-events: none;
         }
-        .empty-particles {
+        .es-particles {
           position: absolute;
           inset: 0;
           pointer-events: none;
+          overflow: hidden;
         }
-        .empty-particle {
+        .es-particle {
           position: absolute;
-          width: 4px;
-          height: 4px;
           border-radius: 999px;
-          opacity: 0.3;
-          filter: blur(1px);
+          background: var(--signature-accent);
+          opacity: 0;
+          filter: blur(0.5px);
         }
-        .empty-card {
+        .es-stack {
           position: relative;
-          padding: var(--space-10) var(--space-12);
-          border-radius: var(--radius-xl);
-          background: linear-gradient(180deg, rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.4));
-          border: 1px solid var(--border-subtle);
-          backdrop-filter: blur(10px);
-          text-align: center;
-          max-width: 420px;
+          z-index: 3;
+          width: min(560px, calc(100vw - 64px));
+          padding: var(--sp-8) var(--sp-6);
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: var(--sp-5);
+          pointer-events: auto;
         }
-        .empty-icon {
-          display: inline-grid;
-          place-items: center;
-          width: 44px;
-          height: 44px;
+        .es-mark {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--sp-2);
+          padding: 0;
+        }
+        .es-dot {
+          width: 8px;
+          height: 8px;
           border-radius: 999px;
-          background: rgba(34, 211, 238, 0.12);
-          color: var(--signature-accent);
-          margin-bottom: var(--space-4);
-          box-shadow: 0 0 24px var(--signature-accent-glow);
+          background: var(--signature-accent);
+          box-shadow: 0 0 12px var(--signature-accent-glow);
+          display: inline-block;
         }
-        .empty-title {
+        .es-wordmark {
           font-family: var(--font-display);
-          font-size: var(--font-size-2xl);
+          font-size: var(--fs-xs);
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          color: var(--text-tertiary);
+        }
+        .es-headline {
+          font-family: var(--font-display);
+          font-size: var(--fs-3xl);
           font-weight: 600;
           color: var(--text-primary);
-          margin-bottom: var(--space-2);
-          letter-spacing: -0.01em;
+          letter-spacing: -0.022em;
+          line-height: 1.05;
+          margin: 0;
         }
-        .empty-sub {
-          font-size: var(--font-size-sm);
+        .es-sub {
+          font-family: var(--font-body);
+          font-size: var(--fs-md);
           color: var(--text-secondary);
-          line-height: var(--line-height-relaxed);
-          max-width: 340px;
-          margin: 0 auto;
+          line-height: 1.5;
+          max-width: 48ch;
+        }
+        .es-list {
+          list-style: none;
+          padding: 0;
+          margin: var(--sp-2) 0 0 0;
+          display: flex;
+          flex-direction: column;
+          gap: var(--sp-2);
+          font-family: var(--font-body);
+          font-size: var(--fs-sm);
+          color: var(--text-tertiary);
+          line-height: 1.6;
+        }
+        .es-list li {
+          display: flex;
+          align-items: center;
+          gap: var(--sp-3);
+        }
+        .es-bullet {
+          width: 6px;
+          height: 6px;
+          border-radius: 999px;
+          background: var(--signature-accent);
+          box-shadow: 0 0 8px var(--signature-accent-soft);
+          flex-shrink: 0;
+        }
+        .es-meter {
+          margin-top: var(--sp-3);
+          display: flex;
+          align-items: end;
+          gap: 4px;
+          height: 22px;
+        }
+        .es-bar {
+          width: 3px;
+          height: 100%;
+          background: var(--signature-accent);
+          border-radius: 2px;
+          transform-origin: bottom;
+          opacity: 0.85;
+        }
+        .es-hint {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--sp-2);
+          font-family: var(--font-body);
+          font-size: var(--fs-xs);
+          color: var(--text-tertiary);
+          margin-top: var(--sp-2);
+        }
+        .es-hint kbd {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          padding: 3px 7px;
+          background: var(--bg-overlay);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-sm);
+          color: var(--text-secondary);
+          letter-spacing: 0.04em;
         }
       `}</style>
     </div>
