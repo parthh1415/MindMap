@@ -11,7 +11,15 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { LayoutGroup } from "framer-motion";
-import { useGraphStore, selectGhostList, selectNodeList, selectEdgeList } from "@/state/graphStore";
+import {
+  useGraphStore,
+  useGhostList,
+  useNodeList,
+  useEdgeList,
+  selectNodeList,
+  selectEdgeList,
+  selectGhostList,
+} from "@/state/graphStore";
 import SolidNode, { type SolidNodeData } from "./SolidNode";
 import GhostNode, { type GhostNodeData } from "./GhostNode";
 import EdgeRenderer, { type GraphEdgeData } from "./EdgeRenderer";
@@ -101,9 +109,9 @@ function computePositions(
  * the ghost→solid morph. (See GhostNode + SolidNode.)
  */
 function GraphCanvasInner() {
-  const nodes = useGraphStore(selectNodeList);
-  const edges = useGraphStore(selectEdgeList);
-  const ghosts = useGraphStore(selectGhostList);
+  const nodes = useNodeList();
+  const edges = useEdgeList();
+  const ghosts = useGhostList();
   const speakerColors = useGraphStore((s) => s.speakerColors);
   const activeSpeakerId = useGraphStore((s) => s.activeSpeakerId);
   const animationQueue = useGraphStore((s) => s.animationQueue);

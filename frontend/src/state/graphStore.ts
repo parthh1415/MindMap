@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import type {
   Edge as ContractEdge,
   GraphEvent,
@@ -236,7 +237,20 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
     }),
 }));
 
-// Convenience selectors
-export const selectNodeList = (s: GraphStore) => Object.values(s.nodes);
-export const selectEdgeList = (s: GraphStore) => Object.values(s.edges);
-export const selectGhostList = (s: GraphStore) => Object.values(s.ghostNodes);
+// Convenience selectors. Plain selector functions (suffixed `Fn`) are kept
+// for non-hook reads via `useGraphStore.getState()`. Hook variants use
+// `useShallow` so identical-content arrays compare equal — without this,
+// `Object.values(...)` returns a fresh reference on every getSnapshot,
+// React 18's `useSyncExternalStore` flags it as new state, and the tree
+// re-renders infinitely (blank screen).
+const nodeListFn = (s: GraphStore) => Object.values(s.nodes);
+const edgeListFn = (s: GraphStore) => Object.values(s.edges);
+const ghostListFn = (s: GraphStore) => Object.values(s.ghostNodes);
+
+export const selectNodeList = nodeListFn;
+export const selectEdgeList = edgeListFn;
+export const selectGhostList = ghostListFn;
+
+export const useNodeList = () => useGraphStore(useShallow(nodeListFn));
+export const useEdgeList = () => useGraphStore(useShallow(edgeListFn));
+export const useGhostList = () => useGraphStore(useShallow(ghostListFn));

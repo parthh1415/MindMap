@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useGraphStore, selectNodeList, selectGhostList } from "@/state/graphStore";
+import { useGraphStore, useNodeList, useGhostList } from "@/state/graphStore";
 import { useSessionStore } from "@/state/sessionStore";
 import { GraphSocketClient } from "@/ws/graphSocketClient";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
@@ -30,8 +30,8 @@ function App() {
   const setSession = useSessionStore((s) => s.setSession);
   const setReducedMotion = useSessionStore((s) => s.setReducedMotion);
   const soundEnabled = useSessionStore((s) => s.soundEnabled);
-  const nodes = useGraphStore(selectNodeList);
-  const ghosts = useGraphStore(selectGhostList);
+  const nodes = useNodeList();
+  const ghosts = useGhostList();
 
   // Bootstrap a session id (from URL or new uuid placeholder).
   useEffect(() => {

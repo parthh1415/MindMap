@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Radio } from "lucide-react";
 import dayjs from "dayjs";
 import useMeasure from "react-use-measure";
-import { useGraphStore, selectNodeList } from "@/state/graphStore";
+import { useGraphStore, useNodeList } from "@/state/graphStore";
 import { useSessionStore } from "@/state/sessionStore";
 import BranchButton from "./BranchButton";
 
@@ -22,7 +22,7 @@ export function TimelineScrubber() {
   const sessionId = useSessionStore((s) => s.currentSessionId);
   const timelineMode = useGraphStore((s) => s.timelineMode);
   const goLive = useGraphStore((s) => s.goLive);
-  const nodes = useGraphStore(selectNodeList);
+  const nodes = useNodeList();
   const reduceMotion = useReducedMotion();
 
   const [trackRef, trackBounds] = useMeasure();
