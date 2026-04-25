@@ -29,7 +29,7 @@ from shared.agent_messages import TopologyDiff  # noqa: E402
 logger = logging.getLogger("agents.llm")
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 MAX_ADDITION_NODES = 5
 MAX_RETRIES_429 = 2

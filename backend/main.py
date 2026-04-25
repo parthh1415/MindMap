@@ -32,7 +32,9 @@ from backend.db.client import close_client, create_indexes, init_client
 from backend.routes import agent_callbacks as agent_callback_routes
 from backend.routes import edges as edges_routes
 from backend.routes import nodes as nodes_routes
+from backend.routes import pivots as pivots_routes
 from backend.routes import sessions as sessions_routes
+from backend.routes import synthesis as synthesis_routes
 from backend.ws import graph_socket, transcript_socket
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,8 @@ async def healthz():
 app.include_router(sessions_routes.router)
 app.include_router(nodes_routes.router)
 app.include_router(edges_routes.router)
+app.include_router(synthesis_routes.router)
+app.include_router(pivots_routes.router)
 app.include_router(agent_callback_routes.router)
 app.include_router(transcript_socket.router)
 app.include_router(graph_socket.router)

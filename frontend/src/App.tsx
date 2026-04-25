@@ -5,15 +5,21 @@ import { GraphSocketClient } from "@/ws/graphSocketClient";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { TopBar } from "@/components/TopBar";
 import { TimelineScrubber } from "@/components/TimelineScrubber";
-import { SidePanel } from "@/components/SidePanel";
 import { SpeakerLegend } from "@/components/SpeakerLegend";
 import { EmptyState } from "@/components/EmptyState";
 import { NodeEditModal } from "@/components/NodeEditModal";
 import { ImageDropZone } from "@/components/ImageDropZone";
 import { TranscriptStream } from "@/components/TranscriptStream";
+import { NodeActionMenu } from "@/components/NodeActionMenu";
+import { ExpandButton } from "@/components/ExpandButton";
+import { SynthesizeDrawer } from "@/components/SynthesizeDrawer";
+import { BranchNavigator } from "@/components/BranchNavigator";
+import { BranchDiffView } from "@/components/BranchDiffView";
+import { PivotToast } from "@/components/PivotToast";
 import { playClick } from "@/lib/sound";
 import { useSessionBootstrap } from "@/integration/sessionBootstrap";
 import { useTranscriptPipeline } from "@/integration/transcriptPipeline";
+import { usePivotPoller } from "@/integration/pivotPoller";
 import { DevPanel } from "@/lib/devPanel";
 
 /**
@@ -42,6 +48,9 @@ function App() {
 
   // Drive speech → backend → topology agent whenever the mic is on.
   useTranscriptPipeline({ sessionId, enabled: micActive });
+
+  // Poll for branchable pivot points while the mic is on.
+  usePivotPoller({ sessionId, enabled: micActive });
 
   // Connect the graph WS once a session exists.
   useEffect(() => {
@@ -86,7 +95,12 @@ function App() {
       </main>
       <SpeakerLegend />
       <TimelineScrubber />
-      <SidePanel />
+      <BranchNavigator />
+      <BranchDiffView />
+      <PivotToast />
+      <NodeActionMenu />
+      <ExpandButton />
+      <SynthesizeDrawer />
       <NodeEditModal />
       <ImageDropZone />
       <TranscriptStream />

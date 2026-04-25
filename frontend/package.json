@@ -12,7 +12,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@types/d3-force": "^3.0.10",
     "clsx": "^2.1.1",
+    "d3-force": "^3.0.0",
+    "d3-quadtree": "^3.0.1",
     "dayjs": "^1.11.13",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.460.0",
