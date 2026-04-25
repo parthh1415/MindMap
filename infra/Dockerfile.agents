@@ -1,0 +1,34 @@
+# Dockerfile for both agent processes (topology + enrichment).
+# Build context expected: repo root.
+#   docker build -f infra/Dockerfile.agents -t mindmap-agents .
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Install system deps (curl is handy for healthchecks; otherwise minimal).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy contracts (read-only at runtime) + agent code.
+COPY shared/ /app/shared/
+COPY agents/ /app/agents/
+
+# Install Python deps.
+RUN pip install --upgrade pip \
+ && pip install -r /app/agents/requirements.txt
+
+# Bundle a tiny start script that runs both processes and waits.
+RUN printf '#!/bin/sh\nset -e\ncd /app/agents\npython topology_agent.py &\npython enrichment_agent.py &\nwait\n' > /app/agents/start.sh \
+ && chmod +x /app/agents/start.sh
+
+EXPOSE 8001 8002
+
+WORKDIR /app/agents
+
+CMD ["/app/agents/start.sh"]

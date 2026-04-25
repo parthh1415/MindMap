@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]
+motor
+pydantic>=2
+pydantic-settings
+groq
+uagents
+python-dotenv
+pytest
+pytest-asyncio
+httpx

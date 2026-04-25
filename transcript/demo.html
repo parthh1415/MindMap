@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>MindMap transcript demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --panel: #161b22;
+        --line: #30363d;
+        --fg: #c9d1d9;
+        --accent: #58a6ff;
+        --warn: #d29922;
+        --bad: #f85149;
+        --good: #3fb950;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0;
+        font-weight: 600;
+      }
+      button {
+        background: var(--panel);
+        color: var(--fg);
+        border: 1px solid var(--line);
+        padding: 6px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        font: inherit;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .pill {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        border: 1px solid var(--line);
+      }
+      .pill.primary {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .pill.fallback {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
+      .pill.error {
+        color: var(--bad);
+        border-color: var(--bad);
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+        height: calc(100% - 64px);
+      }
+      .panel {
+        padding: 12px 16px;
+        overflow: auto;
+      }
+      .panel + .panel {
+        border-left: 1px solid var(--line);
+      }
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8b949e;
+      }
+      .feed-row {
+        padding: 6px 8px;
+        border-bottom: 1px dashed var(--line);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .feed-row.partial {
+        opacity: 0.65;
+        font-style: italic;
+      }
+      .feed-row .speaker {
+        font-weight: 700;
+        margin-right: 8px;
+      }
+      .speaker_0 { color: #79c0ff; }
+      .speaker_1 { color: #ff7b72; }
+      .speaker_2 { color: #d2a8ff; }
+      .speaker_3 { color: #ffa657; }
+      .speaker_4 { color: #56d364; }
+      .log-row {
+        font-size: 12px;
+        color: #8b949e;
+        padding: 2px 0;
+      }
+      .log-row.warn { color: var(--warn); }
+      .log-row.error { color: var(--bad); }
+      .log-row.good { color: var(--good); }
+      .doc {
+        margin-top: 12px;
+        padding: 12px;
+        border: 1px dashed var(--line);
+        border-radius: 6px;
+        font-size: 12px;
+        color: #8b949e;
+      }
+      .doc code {
+        background: var(--panel);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>MindMap · transcript demo</h1>
+      <span id="state" class="pill primary">idle</span>
+      <button id="start">Start</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="toggleFallback">Force Web Speech fallback</button>
+      <span id="speakerHint" class="pill" style="margin-left:auto">no speaker yet</span>
+    </header>
+    <main>
+      <section class="panel">
+        <h2>Transcript feed (interim + final)</h2>
+        <div id="feed"></div>
+        <div class="doc">
+          <strong>Run this demo:</strong>
+          <ul>
+            <li>Set <code>VITE_ELEVENLABS_API_KEY</code> in <code>.env</code> at the repo root.</li>
+            <li>From the repo root: <code>npx vite serve transcript --host</code></li>
+            <li>Open <code>http://localhost:5173/demo.html</code> over HTTPS or localhost.</li>
+            <li>Click <em>Start</em>, allow mic access, and speak.</li>
+            <li>Click <em>Force Web Speech fallback</em> to test the secondary path.</li>
+          </ul>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Diagnostics</h2>
+        <div id="log"></div>
+      </section>
+    </main>
+
+    <script type="module">
+      import { createTranscriptPipeline } from "./client/index.ts";
+
+      const feed = document.getElementById("feed");
+      const log = document.getElementById("log");
+      const stateEl = document.getElementById("state");
+      const startBtn = document.getElementById("start");
+      const stopBtn = document.getElementById("stop");
+      const toggleBtn = document.getElementById("toggleFallback");
+      const speakerHint = document.getElementById("speakerHint");
+
+      const seenSpeakers = new Set();
+
+      function addLog(msg, cls = "") {
+        const div = document.createElement("div");
+        div.className = "log-row " + cls;
+        const ts = new Date().toLocaleTimeString();
+        div.textContent = `[${ts}] ${msg}`;
+        log.prepend(div);
+      }
+
+      // We render the most recent partial per speaker as a single live row,
+      // and append finals as their own rows. Keeps the feed readable.
+      const livePartials = new Map(); // speaker_id -> DOM node
+
+      function speakerColorClass(speakerId) {
+        // Map any incoming id to one of 5 color slots stably.
+        let h = 0;
+        for (const c of speakerId) h = (h * 31 + c.charCodeAt(0)) | 0;
+        return `speaker_${Math.abs(h) % 5}`;
+      }
+
+      function onChunk(chunk) {
+        seenSpeakers.add(chunk.speaker_id);
+        speakerHint.textContent = `speakers: ${[...seenSpeakers].join(", ")}`;
+
+        const colorCls = speakerColorClass(chunk.speaker_id);
+        if (chunk.is_final) {
+          // Clear the live partial for this speaker, append the final row.
+          const live = livePartials.get(chunk.speaker_id);
+          if (live) {
+            live.remove();
+            livePartials.delete(chunk.speaker_id);
+          }
+          const row = document.createElement("div");
+          row.className = "feed-row";
+          row.innerHTML =
+            `<span class="speaker ${colorCls}">${chunk.speaker_id}</span>` +
+            `<span>${chunk.text}</span>`;
+          feed.prepend(row);
+        } else {
+          let row = livePartials.get(chunk.speaker_id);
+          if (!row) {
+            row = document.createElement("div");
+            row.className = "feed-row partial";
+            livePartials.set(chunk.speaker_id, row);
+            feed.prepend(row);
+          }
+          row.innerHTML =
+            `<span class="speaker ${colorCls}">${chunk.speaker_id}</span>` +
+            `<span>${chunk.text}…</span>`;
+        }
+      }
+
+      let pipeline = null;
+      let forceFallback = false;
+
+      async function start() {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        stateEl.textContent = forceFallback ? "fallback" : "primary";
+        stateEl.className = forceFallback ? "pill fallback" : "pill primary";
+
+        pipeline = createTranscriptPipeline({
+          sessionId: `demo_${Date.now()}`,
+          forceFallback,
+          onChunk,
+          onFallbackActivated: (reason, detail) => {
+            stateEl.textContent = `fallback (${reason})`;
+            stateEl.className = "pill fallback";
+            addLog(`Fallback activated: ${reason}${detail ? " — " + detail : ""}`, "warn");
+          },
+        });
+
+        try {
+          await pipeline.start();
+          addLog(pipeline.isFallbackActive() ? "Web Speech fallback running" : "ElevenLabs Scribe v2 connected", "good");
+        } catch (e) {
+          addLog("start() failed: " + (e?.message ?? e), "error");
+          stateEl.textContent = "error";
+          stateEl.className = "pill error";
+        }
+      }
+
+      async function stop() {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        if (pipeline) {
+          await pipeline.stop();
+          pipeline = null;
+        }
+        stateEl.textContent = "idle";
+        stateEl.className = "pill primary";
+        addLog("stopped");
+      }
+
+      startBtn.addEventListener("click", () => start().catch((e) => addLog(String(e), "error")));
+      stopBtn.addEventListener("click", () => stop().catch((e) => addLog(String(e), "error")));
+      toggleBtn.addEventListener("click", () => {
+        forceFallback = !forceFallback;
+        toggleBtn.textContent = forceFallback ? "Use ElevenLabs primary" : "Force Web Speech fallback";
+        addLog("forceFallback=" + forceFallback);
+        if (pipeline) {
+          // Live swap.
+          pipeline.forceFallback("manual").catch((e) => addLog(String(e), "error"));
+          stateEl.textContent = "fallback (manual)";
+          stateEl.className = "pill fallback";
+        }
+      });
+    </script>
+  </body>
+</html>

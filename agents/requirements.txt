@@ -1,0 +1,7 @@
+uagents
+groq
+pydantic>=2
+python-dotenv
+google-generativeai
+pytest
+pytest-asyncio

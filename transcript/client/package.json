@@ -1,0 +1,21 @@
+{
+  "name": "@mindmap/transcript-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-direct speech-to-text pipeline (ElevenLabs Scribe v2 primary, Web Speech fallback) emitting TranscriptChunk messages to the MindMap backend.",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./micCapture": "./micCapture.ts",
+    "./elevenLabsClient": "./elevenLabsClient.ts",
+    "./webSpeechFallback": "./webSpeechFallback.ts",
+    "./transcriptClient": "./transcriptClient.ts",
+    "./backendBridge": "./backendBridge.ts",
+    "./groqWhisperFallback": "./groqWhisperFallback.ts"
+  },
+  "scripts": {
+    "test": "echo 'run tests from transcript/ via: npm test (which delegates to vitest)'"
+  }
+}

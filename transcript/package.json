@@ -1,0 +1,20 @@
+{
+  "name": "@mindmap/transcript",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-direct STT pipeline (ElevenLabs Scribe v2 primary, Web Speech fallback) for MindMap. The library lives in client/; this package wires up the demo + tests.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite serve --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0",
+    "jsdom": "^24.0.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}

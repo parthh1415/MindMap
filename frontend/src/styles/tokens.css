@@ -1,0 +1,146 @@
+/*
+ * MindMap — design tokens
+ *
+ * Style:    Dark Mode (OLED) — cinematic technical
+ *           (selected via /ui-ux-pro-max --design-system; see PLUGINS_USED.md)
+ *
+ * Palette:  "Cinematic Slate + Vivid Speakers"
+ *   --bg-base            #070B14
+ *   --bg-surface         #0F172A
+ *   --bg-raised          #1B2438
+ *   --bg-overlay         #272F42
+ *   --border-subtle      #1F2A3F
+ *   --border-default     #334155
+ *   --text-primary       #F8FAFC
+ *   --text-secondary     #94A3B8
+ *   --text-tertiary      #64748B
+ *   --signature-accent   #22D3EE   (cyan — Live pill, primary CTA, active glow)
+ *   --signature-accent-soft #0891B2
+ *   --destructive        #F43F5E
+ *   --success            #34D399
+ *   --warning            #FBBF24
+ *   --speaker-1          #F472B6   (vivid pink)
+ *   --speaker-2          #A78BFA   (vivid violet)
+ *   --speaker-3          #22D3EE   (cyan)
+ *   --speaker-4          #34D399   (emerald)
+ *   --speaker-5          #FBBF24   (amber)
+ *   --speaker-6          #FB7185   (coral)
+ *
+ * Fonts:    Geist (headings, geometric/technical display)
+ *           Inter (body, with tabular numerals via font-feature-settings)
+ *           Loaded in globals.css from Google Fonts.
+ *
+ * frontend-design/SKILL.md quote (read & applied):
+ *   "Choose a clear conceptual direction and execute it with precision. Bold
+ *    maximalism and refined minimalism both work — the key is intentionality,
+ *    not intensity. ... Dominant colors with sharp accents outperform timid,
+ *    evenly-distributed palettes."
+ *   The cinematic dark mode here uses 95%+ slate canvas with pinpoint vivid
+ *   speaker glows and a single signature cyan accent — refined minimalism
+ *   amplified by physics-based motion.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ───── Surfaces ───── */
+  --bg-base: #070b14;
+  --bg-surface: #0f172a;
+  --bg-raised: #1b2438;
+  --bg-overlay: #272f42;
+  --bg-scrim: rgba(7, 11, 20, 0.72);
+
+  /* ───── Borders ───── */
+  --border-subtle: #1f2a3f;
+  --border-default: #334155;
+  --border-strong: #475569;
+
+  /* ───── Text ───── */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-inverse: #0f172a;
+
+  /* ───── Accents ───── */
+  --signature-accent: #22d3ee;
+  --signature-accent-soft: #0891b2;
+  --signature-accent-glow: rgba(34, 211, 238, 0.45);
+
+  --destructive: #f43f5e;
+  --success: #34d399;
+  --warning: #fbbf24;
+
+  /* ───── Speaker palette (6 vivid hues) ───── */
+  --speaker-1: #f472b6; /* pink */
+  --speaker-2: #a78bfa; /* violet */
+  --speaker-3: #22d3ee; /* cyan */
+  --speaker-4: #34d399; /* emerald */
+  --speaker-5: #fbbf24; /* amber */
+  --speaker-6: #fb7185; /* coral */
+
+  --speaker-1-glow: rgba(244, 114, 182, 0.5);
+  --speaker-2-glow: rgba(167, 139, 250, 0.5);
+  --speaker-3-glow: rgba(34, 211, 238, 0.5);
+  --speaker-4-glow: rgba(52, 211, 153, 0.5);
+  --speaker-5-glow: rgba(251, 191, 36, 0.5);
+  --speaker-6-glow: rgba(251, 113, 133, 0.5);
+
+  /* ───── Spacing (4px scale) ───── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ───── Radius ───── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* ───── Type scale ───── */
+  --font-display: "Geist", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 22px;
+  --font-size-2xl: 28px;
+  --font-size-3xl: 36px;
+
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.65;
+
+  /* ───── Motion (durations only — most motion uses Framer springs) ───── */
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --motion-slow: 360ms;
+  --motion-cinematic: 980ms;
+
+  /* ───── Elevation (custom shadow scale) ───── */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --elev-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.45);
+  --elev-4: 0 24px 64px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.5);
+  --elev-modal: 0 32px 96px rgba(0, 0, 0, 0.7), 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  /* ───── Z-index ───── */
+  --z-canvas: 0;
+  --z-side: 20;
+  --z-top: 30;
+  --z-scrubber: 40;
+  --z-overlay: 80;
+  --z-modal: 100;
+  --z-toast: 1000;
+}
