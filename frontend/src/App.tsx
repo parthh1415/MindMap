@@ -10,6 +10,7 @@ import { SpeakerLegend } from "@/components/SpeakerLegend";
 import { EmptyState } from "@/components/EmptyState";
 import { NodeEditModal } from "@/components/NodeEditModal";
 import { ImageDropZone } from "@/components/ImageDropZone";
+import { TranscriptStream } from "@/components/TranscriptStream";
 import { playClick } from "@/lib/sound";
 import { useSessionBootstrap } from "@/integration/sessionBootstrap";
 import { useTranscriptPipeline } from "@/integration/transcriptPipeline";
@@ -88,6 +89,7 @@ function App() {
       <SidePanel />
       <NodeEditModal />
       <ImageDropZone />
+      <TranscriptStream />
       <DevPanel />
 
       <style>{`

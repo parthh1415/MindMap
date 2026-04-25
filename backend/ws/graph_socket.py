@@ -95,10 +95,12 @@ async def graph_ws(websocket: WebSocket, session_id: str):
 
         while True:
             # We don't expect inbound messages on this socket, but we keep the
-            # loop alive to detect disconnects.
+            # loop alive to detect disconnects. Some starlette code paths raise
+            # RuntimeError("WebSocket is not connected") instead of
+            # WebSocketDisconnect when the client closes — catch both.
             try:
                 await websocket.receive_text()
-            except WebSocketDisconnect:
+            except (WebSocketDisconnect, RuntimeError):
                 break
     finally:
         await _remove_subscriber(session_id, websocket)

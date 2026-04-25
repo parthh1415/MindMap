@@ -8,88 +8,101 @@ export type GhostNodeData = {
 };
 
 /**
- * Ghost: a not-yet-committed concept the system thinks it heard. Wrapped
- * in a Framer Motion shell with `layoutId={ghost_id}` so the eventual
- * SolidNode (mounted with the same layoutId via `isGhostResolution`) can
- * morph in place — the signature transition.
+ * Ghost node — circular, half-rendered concept the system thinks it
+ * heard but the topology agent hasn't committed yet. Smaller than a
+ * solid node, dashed speaker-tinted ring, label centered, infinite
+ * gentle pulse. Shares a `layoutId={ghost_id}` with the eventual
+ * SolidNode so Framer Motion morphs the ghost into the solid in place.
  */
 export function GhostNode(props: NodeProps<GhostNodeData>) {
   const { ghost_id, label, speakerColor } = props.data;
   const reduce = useReducedMotion();
 
+  const long = label.length > 14;
+
   return (
     <motion.div
       layoutId={ghost_id}
-      initial={reduce ? false : { opacity: 0, scale: 0.9 }}
+      initial={reduce ? false : { opacity: 0, scale: 0.6 }}
       animate={
         reduce
           ? { opacity: 0.7 }
-          : { opacity: [0.5, 0.78, 0.5], scale: [0.99, 1.015, 0.99] }
+          : { opacity: [0.55, 0.85, 0.55], scale: [0.98, 1.02, 0.98] }
       }
       transition={
         reduce
           ? { duration: 0 }
-          : { duration: 1.7, repeat: Infinity, ease: "easeInOut" }
+          : { duration: 1.8, repeat: Infinity, ease: "easeInOut" }
       }
-      style={{
-        ["--ghost-speaker" as string]: speakerColor,
-      }}
+      style={{ ["--ghost-speaker" as string]: speakerColor }}
       className="gn"
       aria-label={`Possible concept: ${label}`}
       data-ghost-id={ghost_id}
     >
-      <span className="gn__dot" aria-hidden />
-      <span className="gn__label">{label}</span>
-      <span className="gn__hint">appearing…</span>
+      <span
+        className="gn__label"
+        style={{ fontSize: long ? 11 : 12 }}
+      >
+        {label}
+      </span>
+      <span className="gn__hint" aria-hidden>
+        appearing
+      </span>
       <Handle type="target" position={Position.Top} className="rf-handle-ghost" />
       <Handle type="source" position={Position.Bottom} className="rf-handle-ghost" />
 
       <style>{`
         .gn {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          min-width: 132px;
-          border-radius: 10px;
-          border: 1px dashed color-mix(in srgb, var(--ghost-speaker) 65%, transparent);
+          position: relative;
+          width: 88px;
+          height: 88px;
+          border-radius: 999px;
+          border: 1.5px dashed color-mix(in srgb, var(--ghost-speaker) 75%, transparent);
           background:
-            linear-gradient(180deg,
-              color-mix(in srgb, var(--bg-base) 92%, var(--ghost-speaker)),
-              var(--bg-base));
-          backdrop-filter: blur(4px);
+            radial-gradient(circle at 30% 30%,
+              color-mix(in srgb, var(--bg-base) 80%, var(--ghost-speaker)) 0%,
+              var(--bg-base) 70%);
           color: var(--text-secondary);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          padding: 8px 10px;
           will-change: transform, opacity;
           box-shadow:
-            0 0 0 1px color-mix(in srgb, var(--ghost-speaker) 25%, transparent),
-            0 0 14px 2px color-mix(in srgb, var(--ghost-speaker) 22%, transparent);
-        }
-        .gn__dot {
-          width: 6px; height: 6px;
-          border-radius: 999px;
-          background: var(--ghost-speaker);
-          box-shadow: 0 0 8px var(--ghost-speaker);
-          flex-shrink: 0;
+            0 0 0 1px color-mix(in srgb, var(--ghost-speaker) 22%, transparent),
+            0 0 18px 3px color-mix(in srgb, var(--ghost-speaker) 24%, transparent);
         }
         .gn__label {
           font-family: var(--font-display);
-          font-size: 12px;
           font-weight: 500;
           font-style: italic;
           color: var(--text-primary);
+          text-align: center;
+          line-height: 1.15;
+          letter-spacing: -0.005em;
+          padding: 0 2px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          word-break: break-word;
         }
         .gn__hint {
           font-family: var(--font-mono);
-          font-size: 10px;
+          font-size: 8px;
           color: var(--text-tertiary);
-          letter-spacing: 0.04em;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
         }
         .rf-handle-ghost {
-          width: 4px;
-          height: 4px;
-          background: var(--border-subtle);
+          width: 3px;
+          height: 3px;
+          background: transparent;
           border: none;
-          opacity: 0.3;
+          opacity: 0;
         }
       `}</style>
     </motion.div>

@@ -26,6 +26,7 @@ import {
 } from "@mindmap/transcript-client";
 import type { TranscriptChunk } from "@shared/ws_messages";
 import { processTranscriptPartial } from "@/lib/optimisticGhosts";
+import { useTranscriptStore } from "@/state/transcriptStore";
 
 export interface UseTranscriptPipelineArgs {
   sessionId: string | null;
@@ -62,7 +63,15 @@ export function useTranscriptPipeline({
     const handleChunk = (chunk: TranscriptChunk) => {
       // 1. Forward to backend so the topology agent gets fed.
       bridge?.send(chunk);
-      // 2. Drive optimistic ghosts on PARTIALS only — finals are authoritative
+      // 2. Surface in the live caption stream so the user can SEE what
+      //    is being captured (transcription quality is visible).
+      const tStore = useTranscriptStore.getState();
+      if (chunk.is_final) {
+        tStore.pushFinal(chunk.speaker_id, chunk.text);
+      } else {
+        tStore.pushPartial(chunk.speaker_id, chunk.text);
+      }
+      // 3. Drive optimistic ghosts on PARTIALS — finals are authoritative
       //    and the topology agent + Groq will produce real nodes for those.
       if (!chunk.is_final) {
         try {

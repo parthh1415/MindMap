@@ -103,9 +103,11 @@ export function extractCandidates(text: string): string[] {
       const lower = slice.map((t) => t.toLowerCase());
       // skip if every token is a stoplist token
       if (lower.every((t) => STOPLIST.has(t))) continue;
-      // require at least one non-stoplist token of length ≥ 4 (or capitalized non-stoplist)
+      // require at least one non-stoplist token of length ≥ 3 (or capitalized non-stoplist).
+      // 3 is intentional — picks up acronyms like API, AWS, lag, git that the
+      // user is more likely to want surfaced.
       const hasMeat = slice.some(
-        (t) => !STOPLIST.has(t.toLowerCase()) && (t.length >= 4 || /^[A-Z]/.test(t)),
+        (t) => !STOPLIST.has(t.toLowerCase()) && (t.length >= 3 || /^[A-Z]/.test(t)),
       );
       if (!hasMeat) continue;
 
