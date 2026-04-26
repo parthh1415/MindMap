@@ -77,12 +77,15 @@ export interface SceneRefs {
   edgeMat: THREE.Material;
 }
 
-const NODE_RADIUS = 0.08;
-const EDGE_RADIUS = 0.012;
-const COLOR_NODE_BASE = 0x4a7bff;      // bluish
-const COLOR_NODE_HOVER = 0xffae3d;     // warm
-const COLOR_NODE_ACTIVE = 0x40d97a;    // green
-const COLOR_EDGE = 0x6a7282;
+// Visual feel — tuned for the Phosphor Dark + volt-yellow brand.
+// Bigger orbs read better at typical zoom; thicker edges make
+// connections legible from a distance.
+const NODE_RADIUS = 0.14;
+const EDGE_RADIUS = 0.025;
+const COLOR_NODE_BASE = 0x6ec1ff;      // cyan glass
+const COLOR_NODE_HOVER = 0xffae3d;     // warm amber
+const COLOR_NODE_ACTIVE = 0xd6ff3a;    // volt yellow (brand)
+const COLOR_EDGE = 0x6ec1ff;           // matches base nodes — connections feel like flowing energy
 
 export function buildScene(
   container: HTMLElement,
@@ -95,13 +98,22 @@ export function buildScene(
   renderer.setSize(w, h);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setClearColor(0x000000, 0);
+  // Tone mapping makes the emissive glow read more like neon than flat color.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(3, 5, 5);
-  scene.add(dir);
+  // Layered lighting: hemisphere for soft sky/ground tint, directional
+  // for highlight angle, point light at center for self-illumination
+  // bias toward the graph's interior.
+  scene.add(new THREE.HemisphereLight(0x88aaff, 0x0a0d18, 0.7));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+  keyLight.position.set(3, 5, 5);
+  scene.add(keyLight);
+  const fillLight = new THREE.PointLight(0x6ec1ff, 0.8, 8);
+  fillLight.position.set(0, 0, 0);
+  scene.add(fillLight);
 
   const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
   camera.position.set(0, 0, 5);
@@ -110,13 +122,27 @@ export function buildScene(
   scene.add(graphRoot);
 
   const nodeMeshes = new Map<string, THREE.Mesh>();
-  const sphereGeom = new THREE.SphereGeometry(NODE_RADIUS, 24, 24);
+  // Higher-poly sphere — at this radius the silhouette quality matters.
+  const sphereGeom = new THREE.SphereGeometry(NODE_RADIUS, 48, 48);
   for (const n of nodes) {
     const p = positions[n._id];
     if (!p) continue;
-    const mat = new THREE.MeshStandardMaterial({
-      color: COLOR_NODE_BASE, emissive: COLOR_NODE_BASE, emissiveIntensity: 0.2,
-      roughness: 0.4, metalness: 0.1,
+    // MeshPhysicalMaterial: real PBR with iridescence sheen + small
+    // transmission, giving a translucent glass-orb look. Per-node
+    // material so hover/active state can flip color independently.
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: COLOR_NODE_BASE,
+      emissive: COLOR_NODE_BASE,
+      emissiveIntensity: 0.55,
+      roughness: 0.18,
+      metalness: 0.05,
+      clearcoat: 0.8,
+      clearcoatRoughness: 0.15,
+      iridescence: 0.35,
+      iridescenceIOR: 1.4,
+      transmission: 0.15,
+      thickness: 0.4,
+      ior: 1.45,
     });
     const mesh = new THREE.Mesh(sphereGeom, mat);
     mesh.position.set(p.x, p.y, p.z);
@@ -127,14 +153,24 @@ export function buildScene(
 
   const edgeMeshes: THREE.Mesh[] = [];
   const arrowHelpers: THREE.ArrowHelper[] = [];
-  const edgeMat = new THREE.MeshStandardMaterial({ color: COLOR_EDGE, roughness: 0.6 });
+  // Edge material: bright cyan with strong emissive so connections
+  // read as glowing tubes against the dark backdrop.
+  const edgeMat = new THREE.MeshStandardMaterial({
+    color: COLOR_EDGE,
+    emissive: COLOR_EDGE,
+    emissiveIntensity: 0.6,
+    roughness: 0.3,
+    metalness: 0.2,
+    transparent: true,
+    opacity: 0.85,
+  });
   for (const e of edges) {
     const a = positions[e.source_id], b = positions[e.target_id];
     if (!a || !b) continue;
     const av = new THREE.Vector3(a.x, a.y, a.z);
     const bv = new THREE.Vector3(b.x, b.y, b.z);
     const len = av.distanceTo(bv);
-    const cyl = new THREE.CylinderGeometry(EDGE_RADIUS, EDGE_RADIUS, len, 8);
+    const cyl = new THREE.CylinderGeometry(EDGE_RADIUS, EDGE_RADIUS, len, 16);
     const mesh = new THREE.Mesh(cyl, edgeMat);
     const mid = av.clone().add(bv).multiplyScalar(0.5);
     mesh.position.copy(mid);
@@ -151,13 +187,15 @@ export function buildScene(
 export function setNodeColor(
   mesh: THREE.Mesh, state: "base" | "hover" | "active",
 ): void {
-  const mat = mesh.material as THREE.MeshStandardMaterial;
+  const mat = mesh.material as THREE.MeshPhysicalMaterial;
   const c = state === "active" ? COLOR_NODE_ACTIVE
           : state === "hover" ? COLOR_NODE_HOVER
           : COLOR_NODE_BASE;
   mat.color.setHex(c);
   mat.emissive.setHex(c);
-  mat.emissiveIntensity = state === "base" ? 0.2 : 0.5;
+  // Pop the glow on interaction so state change reads instantly.
+  mat.emissiveIntensity = state === "base" ? 0.55 : 1.1;
+  mat.iridescence = state === "base" ? 0.35 : 0.6;
 }
 
 export function projectNodeToScreen(
