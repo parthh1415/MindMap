@@ -102,6 +102,9 @@ def _patch_dispatch_to_post_back(client: TestClient, monkeypatch, response_paylo
 
     monkeypatch.setattr(agent_synth_client, "_send_to_agent", _fake_send)
     monkeypatch.setattr(agent_synth_client, "_synthesis_address", lambda: "agent1mockaddr")
+    # Shorten timeout so test failures fail fast (was 45s default,
+    # which made the suite take ~3 minutes of pure waiting).
+    monkeypatch.setattr(agent_synth_client, "DEFAULT_TIMEOUT_SECONDS", 3.0)
 
 
 # ---------------------------------------------------------------------------

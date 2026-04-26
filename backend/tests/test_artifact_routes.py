@@ -47,6 +47,14 @@ def _make_node(db, *, session_id: str, node_id: str, label: str, created_at=None
     )
 
 
+# Mock-callback helpers shorten DEFAULT_TIMEOUT_SECONDS so tests don't
+# pay the production-grade 45s wait for each "completes" assertion.
+# The thread-based callback delivers fast in practice; we just need a
+# small window so an unexpected hang fails loudly instead of stalling
+# the whole suite (the prior default cost ~270s of pure timeout).
+_TEST_AGENT_TIMEOUT = 3.0
+
+
 def _patch_classify_callback(client: TestClient, monkeypatch, payload: dict):
     async def _fake_send(addr, message):
         body = {
@@ -64,6 +72,7 @@ def _patch_classify_callback(client: TestClient, monkeypatch, payload: dict):
 
     monkeypatch.setattr(agent_artifact_client, "_send_to_agent", _fake_send)
     monkeypatch.setattr(agent_artifact_client, "_artifact_address", lambda: "agent1mockaddr")
+    monkeypatch.setattr(agent_artifact_client, "DEFAULT_TIMEOUT_SECONDS", _TEST_AGENT_TIMEOUT)
 
 
 def _patch_generate_callback(client: TestClient, monkeypatch, payload: dict):
@@ -86,6 +95,7 @@ def _patch_generate_callback(client: TestClient, monkeypatch, payload: dict):
 
     monkeypatch.setattr(agent_artifact_client, "_send_to_agent", _fake_send)
     monkeypatch.setattr(agent_artifact_client, "_artifact_address", lambda: "agent1mockaddr")
+    monkeypatch.setattr(agent_artifact_client, "DEFAULT_TIMEOUT_SECONDS", _TEST_AGENT_TIMEOUT)
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +278,7 @@ def test_classify_with_at_pulls_historical_nodes(client, monkeypatch, db):
 
     monkeypatch.setattr(agent_artifact_client, "_send_to_agent", _fake_send)
     monkeypatch.setattr(agent_artifact_client, "_artifact_address", lambda: "agent1mock")
+    monkeypatch.setattr(agent_artifact_client, "DEFAULT_TIMEOUT_SECONDS", _TEST_AGENT_TIMEOUT)
 
     # at=earlier+30min should include only n_old.
     at_iso = (earlier + timedelta(minutes=30)).isoformat()
