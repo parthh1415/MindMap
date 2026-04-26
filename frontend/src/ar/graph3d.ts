@@ -123,6 +123,33 @@ const SETTLE_EPSILON = 0.0008;     // distance² below which we snap + stop anim
 // — these are not stored in the graph data, just drawn.
 const KNN_AMBIENT = 5;
 
+// ── Label visibility (combined importance-tier + camera-distance fade) ──
+//
+// The 3D constellation gets dense fast; root + branch + leaf labels
+// stacked together render as illegible word-soup (the cluster the user
+// screenshotted). To keep the AR view readable, each label's target
+// opacity is computed per-frame from two signals:
+//
+//   1. Importance tier sets the BASE distance at which the label fades.
+//      Roots stay legible from far away; leaves only appear when the
+//      camera is close enough that the orb is genuinely in focus.
+//   2. Camera distance to the orb itself drives a soft fade across a
+//      ~1.5-unit band — no popping, just a graceful resolve.
+//
+// Thresholds are "show distance" (full opacity at this camera-Z to orb
+// distance or closer) and "fade distance" (zero opacity beyond this).
+// Anything between linearly interpolates.
+const LABEL_TIER_ROOT_SHOW = 12.0;   // roots ≥ 0.75 importance — almost always on
+const LABEL_TIER_ROOT_FADE = 14.0;
+const LABEL_TIER_BRANCH_SHOW = 5.5;  // branches 0.4..0.75
+const LABEL_TIER_BRANCH_FADE = 8.0;
+const LABEL_TIER_LEAF_SHOW = 3.0;    // leaves < 0.4 — only when zoomed in
+const LABEL_TIER_LEAF_FADE = 5.0;
+// Smoothing factor applied per frame. 0.12 ≈ ~6-frame half-life at 60
+// fps; keeps fade pleasant without lagging the camera so far that the
+// label visibility feels disconnected from where you're looking.
+const LABEL_OPACITY_SMOOTHING = 0.12;
+
 // Per-orb animation state stored on userData. Position is ABSOLUTE world.
 interface OrbAnimState {
   target: THREE.Vector3;     // where the force layout wants this orb
@@ -413,6 +440,11 @@ export function buildScene(
     label.scale.set(labelScale, labelScale, 1);
     label.userData.nodeId = n._id;
     label.userData.baseScale = labelScale;
+    label.userData.importance = importance;
+    // Smoothed opacity used by updateLabelVisibility() — starts hidden
+    // so the bloom-from-center entry doesn't show 30 pre-positioned
+    // labels stacked at the origin.
+    label.userData.opacityCurrent = 0;
     label.renderOrder = 2; // above edge lines (1)
     graphRoot.add(label);
     labelSprites.set(n._id, label);
@@ -622,6 +654,79 @@ export function updateEdgePositions(refs: SceneRefs): void {
     arr[off++] = b.position.x; arr[off++] = b.position.y; arr[off++] = b.position.z;
   }
   posAttr.needsUpdate = true;
+}
+
+export interface LabelVisibilityOverrides {
+  /** Currently-hovered orb id (pointer or mouse). Its label always
+   *  resolves to full opacity so the user can read what they're
+   *  pointing at, regardless of camera distance. */
+  hoveredId?: string | null;
+  /** Set of node ids with open context cards. Their labels stay
+   *  pinned visible — without this, an open card would float next to
+   *  a faded-out orb and the user couldn't tell which orb it belongs
+   *  to. */
+  pinnedIds?: Set<string> | null;
+}
+
+/**
+ * Combined importance-tier + camera-distance label fade. Called every
+ * frame from the RAF loop. Each label sprite's material.opacity eases
+ * toward a target derived from its importance tier and how far the
+ * camera is from the orb — with an override path that forces full
+ * opacity for the hovered orb and any orb with an open context card.
+ *
+ * Result: roots stay legible from any angle; leaves only resolve when
+ * you've zoomed close enough; AND whichever orbs the user is currently
+ * interacting with — pointing at, or expanded — always read clearly,
+ * even if the rest of their tier is faded out.
+ */
+export function updateLabelVisibility(
+  refs: SceneRefs,
+  overrides?: LabelVisibilityOverrides,
+): void {
+  const camPos = new THREE.Vector3();
+  refs.camera.getWorldPosition(camPos);
+  const orbPos = new THREE.Vector3();
+  const hoveredId = overrides?.hoveredId ?? null;
+  const pinnedIds = overrides?.pinnedIds ?? null;
+  refs.labelSprites.forEach((label, id) => {
+    const orb = refs.orbSprites.get(id);
+    if (!orb) return;
+    orb.getWorldPosition(orbPos);
+    const dist = camPos.distanceTo(orbPos);
+    const importance = (label.userData.importance as number | undefined) ?? 0.5;
+    let showAt: number;
+    let fadeAt: number;
+    if (importance >= 0.75) {
+      showAt = LABEL_TIER_ROOT_SHOW;
+      fadeAt = LABEL_TIER_ROOT_FADE;
+    } else if (importance >= 0.4) {
+      showAt = LABEL_TIER_BRANCH_SHOW;
+      fadeAt = LABEL_TIER_BRANCH_FADE;
+    } else {
+      showAt = LABEL_TIER_LEAF_SHOW;
+      fadeAt = LABEL_TIER_LEAF_FADE;
+    }
+    // Linear ramp from showAt (1.0) to fadeAt (0.0).
+    let target: number;
+    if (dist <= showAt) target = 1;
+    else if (dist >= fadeAt) target = 0;
+    else target = 1 - (dist - showAt) / (fadeAt - showAt);
+
+    // Interaction overrides — pinch-card and hover both pin the label
+    // to full opacity. Applied AFTER tier/distance so they always win.
+    if (id === hoveredId) target = 1;
+    if (pinnedIds && pinnedIds.has(id)) target = 1;
+
+    const cur = (label.userData.opacityCurrent as number | undefined) ?? 0;
+    const next = cur + (target - cur) * LABEL_OPACITY_SMOOTHING;
+    label.userData.opacityCurrent = next;
+    const mat = label.material as THREE.SpriteMaterial;
+    mat.opacity = next;
+    // Small perf nicety: when fully transparent, skip rendering the
+    // sprite entirely. Saves draw calls in dense leaf clusters.
+    label.visible = next > 0.02;
+  });
 }
 
 /**

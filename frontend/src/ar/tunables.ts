@@ -48,3 +48,9 @@ export const ROLE_LOCK_HOLD_FRAMES = 30;
 
 export const TARGET_GRAPH_RADIUS = 2.0;
 export const FORCE_SIM_ITERATIONS = 200;
+
+// Hold-pinch on the right hand: continuous pinch over a hovered orb for
+// this many ms triggers the "expand context" action. Quick pinches under
+// the threshold remain the existing activate/mark gesture, so the two
+// behaviours coexist on the same hand without a new gesture vocabulary.
+export const HOLD_PINCH_MS = 350;

@@ -7,6 +7,7 @@ import {
   ZOOM_PINCH_THRESHOLD,
   DEPTH_DAMPING,
   MAX_ZOOM_STEP,
+  HOLD_PINCH_MS,
 } from "./tunables";
 
 interface ControlState {
@@ -21,6 +22,11 @@ interface ControlState {
 interface PointerState {
   trackId: string | null;
   wasPinched: boolean;
+  /** Wall-clock ms when the pinch began. Used to fire a one-shot
+   *  pointerHoldPinch=true the frame the pinch passes HOLD_PINCH_MS,
+   *  without re-firing while the pinch is still held. */
+  pinchStartedAt: number | null;
+  holdFired: boolean;
 }
 
 interface PinchZoomState {
@@ -44,7 +50,12 @@ interface PinchZoomState {
  */
 export function createGestureController() {
   let control: ControlState | null = null;
-  let pointer: PointerState = { trackId: null, wasPinched: false };
+  let pointer: PointerState = {
+    trackId: null,
+    wasPinched: false,
+    pinchStartedAt: null,
+    holdFired: false,
+  };
   let pinchZoom: PinchZoomState = { pairKey: null, prevDistance: 0 };
 
   const update = (tracks: TrackedHand[]): GestureFrame => {
@@ -59,6 +70,7 @@ export function createGestureController() {
     let zoomDelta: GestureFrame["zoomDelta"] = null;
     let pointerScreen: GestureFrame["pointerScreen"] = null;
     let pointerPinchEdge: GestureFrame["pointerPinchEdge"] = null;
+    let pointerHoldPinch = false;
 
     if (isTwoHandedZoom) {
       // ── Two-handed pinch-spread → zoom ──
@@ -155,21 +167,68 @@ export function createGestureController() {
       const tip = ptr.smoothed[8]!;
       pointerScreen = { x: tip.x, y: tip.y };
       const ptrBoundChanged = pointer.trackId !== ptr.trackId;
+      const now = Date.now();
+      let nextStart = pointer.pinchStartedAt;
+      let nextHoldFired = pointer.holdFired;
       if (!ptrBoundChanged) {
-        if (ptr.isPinched && !pointer.wasPinched) pointerPinchEdge = "down";
-        else if (!ptr.isPinched && pointer.wasPinched) pointerPinchEdge = "up";
+        if (ptr.isPinched && !pointer.wasPinched) {
+          pointerPinchEdge = "down";
+          nextStart = now;
+          nextHoldFired = false;
+        } else if (!ptr.isPinched && pointer.wasPinched) {
+          pointerPinchEdge = "up";
+          nextStart = null;
+          nextHoldFired = false;
+        }
+      } else {
+        // Track id changed mid-pinch — reset the hold timer so a new
+        // pinch on a freshly-tracked hand doesn't inherit elapsed time.
+        nextStart = ptr.isPinched ? now : null;
+        nextHoldFired = false;
       }
-      pointer = { trackId: ptr.trackId, wasPinched: ptr.isPinched };
+      // Edge-trigger the hold the first frame the sustained pinch
+      // crosses the threshold; never re-fire until the pinch is released.
+      if (
+        ptr.isPinched &&
+        nextStart != null &&
+        !nextHoldFired &&
+        now - nextStart >= HOLD_PINCH_MS
+      ) {
+        pointerHoldPinch = true;
+        nextHoldFired = true;
+      }
+      pointer = {
+        trackId: ptr.trackId,
+        wasPinched: ptr.isPinched,
+        pinchStartedAt: nextStart,
+        holdFired: nextHoldFired,
+      };
     } else {
-      pointer = { trackId: null, wasPinched: false };
+      pointer = {
+        trackId: null,
+        wasPinched: false,
+        pinchStartedAt: null,
+        holdFired: false,
+      };
     }
 
-    return { rotateDelta, zoomDelta, pointerScreen, pointerPinchEdge };
+    return {
+      rotateDelta,
+      zoomDelta,
+      pointerScreen,
+      pointerPinchEdge,
+      pointerHoldPinch,
+    };
   };
 
   const reset = () => {
     control = null;
-    pointer = { trackId: null, wasPinched: false };
+    pointer = {
+      trackId: null,
+      wasPinched: false,
+      pinchStartedAt: null,
+      holdFired: false,
+    };
     pinchZoom = { pairKey: null, prevDistance: 0 };
   };
 
