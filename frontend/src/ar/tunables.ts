@@ -3,21 +3,23 @@
 export const SMOOTHING_ALPHA = 0.5;
 export const TRACK_MATCH_MAX_DISTANCE = 0.25;
 
-export const ROTATE_SENSITIVITY = 0.018;
-export const ROTATION_DAMPING = 0.22;
+// Slower, smoother, more precise — wrist movements translate to small
+// rotations + the lerp damping is gentle so the graph eases into pose
+// rather than snapping.
+export const ROTATE_SENSITIVITY = 0.006;
+export const ROTATION_DAMPING = 0.08;
 
-export const ZOOM_DEPTH_SENSITIVITY = 14.0;
+// Zoom: tiny per-frame steps + heavier damping = gradual continuous
+// zoom rather than jerky steps.
+export const ZOOM_DEPTH_SENSITIVITY = 5.0;
 export const ZOOM_DEPTH_THRESHOLD = 0.0015;
-export const DEPTH_DAMPING = 0.55;
-export const MAX_ZOOM_STEP = 0.8;
-export const ZOOM_CAMERA_DAMPING = 0.15;
+export const DEPTH_DAMPING = 0.45;
+export const MAX_ZOOM_STEP = 0.25;
+export const ZOOM_CAMERA_DAMPING = 0.06;
 
 // Pinch detection uses (thumb-tip ↔ index-tip distance) / palm-span.
-// Original 0.045 / 0.06 was too tight — fingertips had to almost
-// touch for the model to register, and MediaPipe's confidence dips
-// at the edges of the frame meant pinches were dropped intermittently.
-// 0.085 / 0.13 gives a forgiving "pinch shape" that activates well
-// before fingertips touch and disengages cleanly when they spread.
+// Forgiving thresholds — pinch engages well before fingertips touch
+// and disengages cleanly when they spread apart.
 export const PINCH_ENTER_THRESHOLD = 0.085;
 export const PINCH_EXIT_THRESHOLD = 0.13;
 

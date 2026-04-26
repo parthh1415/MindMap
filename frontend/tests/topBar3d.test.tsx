@@ -39,7 +39,7 @@ describe("TopBar 3D button gating", () => {
     expect(btn).toBeDisabled();
   });
 
-  it("disables the 3D button while the mic is live", () => {
+  it("ENABLES the 3D button while the mic is live (live AR — orbs appear as you talk)", () => {
     act(() => {
       useSessionStore.setState({
         currentSessionId: "session-abc",
@@ -48,8 +48,8 @@ describe("TopBar 3D button gating", () => {
     });
     renderTopBar();
     const btn = screen.getByRole("button", { name: /open 3d ar view/i });
-    expect(btn).toBeDisabled();
-    expect(btn.getAttribute("title") ?? "").toMatch(/stop the mic/i);
+    expect(btn).not.toBeDisabled();
+    expect(btn.getAttribute("title") ?? "").toMatch(/live/i);
   });
 
   it("enables the 3D button when session exists and mic is off", () => {
