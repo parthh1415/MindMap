@@ -43,4 +43,22 @@ describe("initDetector runtime contract", () => {
   it("memoizes the script-load promise so we don't inject the IIFE twice", () => {
     expect(src).toMatch(/mediapipeScriptLoadPromise/);
   });
+
+  // Regression — these assertions catch the 'No backend found in registry'
+  // error class. Even with runtime: "mediapipe", hand-pose-detection's
+  // createDetector calls tf.ready() during setup and that throws if no
+  // tfjs backend is registered. We MUST keep the side-effect import +
+  // setBackend("webgl") above tf.ready().
+  it("imports a tfjs backend (side-effect import that registers it in the engine)", () => {
+    // Anchor to start-of-line so a commented-out import doesn't pass.
+    expect(src).toMatch(/^import\s+["']@tensorflow\/tfjs-backend-webgl["']/m);
+  });
+
+  it("calls tf.setBackend(\"webgl\") BEFORE tf.ready() to satisfy the engine", () => {
+    const setBackendIdx = src.search(/await\s+tf\.setBackend\(\s*"webgl"\s*\)/);
+    const readyIdx = src.search(/await\s+tf\.ready\(\)/);
+    expect(setBackendIdx).toBeGreaterThan(-1);
+    expect(readyIdx).toBeGreaterThan(-1);
+    expect(setBackendIdx).toBeLessThan(readyIdx);
+  });
 });

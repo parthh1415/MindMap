@@ -151,6 +151,13 @@ import {
   type HandDetector,
 } from "@tensorflow-models/hand-pose-detection";
 import * as tf from "@tensorflow/tfjs-core";
+// Side-effect import: registers the WebGL backend in the tfjs engine.
+// Even with runtime: "mediapipe" (which runs inference via its own wasm),
+// hand-pose-detection's createDetector calls tf.ready() during setup —
+// and tf.ready() throws "No backend found in registry" if NO tfjs
+// backend has been registered. WebGL is the fastest universally-
+// available choice for the small bootstrap-time tensors.
+import "@tensorflow/tfjs-backend-webgl";
 
 let detector: HandDetector | null = null;
 let mediapipeScriptLoadPromise: Promise<void> | null = null;
@@ -209,9 +216,11 @@ export async function initDetector(): Promise<HandDetector> {
   // 1. Inject the @mediapipe/hands IIFE so the alias-stub's lazy Proxy
   //    can forward `new Hands(config)` to the real constructor.
   await loadMediaPipeHandsScript();
-  // 2. tfjs-core just needs to be ready — mediapipe runtime doesn't
-  //    use a tfjs backend for inference, but createDetector does some
-  //    light setup work that benefits from tf.ready().
+  // 2. Activate the WebGL backend. Without setBackend before tf.ready,
+  //    'No backend found in registry' is thrown — even though mediapipe
+  //    runtime runs inference via its own wasm, the tfjs engine still
+  //    needs a backend for createDetector's setup-time tensors.
+  await tf.setBackend("webgl");
   await tf.ready();
   // 3. mediapipe runtime — accurate, fast, all assets local.
   detector = await createDetector(SupportedModels.MediaPipeHands, {
