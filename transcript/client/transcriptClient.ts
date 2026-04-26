@@ -26,6 +26,10 @@ import {
   createWebSpeechFallback,
   type WebSpeechFallbackHandle,
 } from "./webSpeechFallback";
+import {
+  createDiarizeUploader,
+  type DiarizeUploaderHandle,
+} from "./diarizeUploader";
 
 export type FallbackReason =
   | "auth"
@@ -97,6 +101,12 @@ export function createTranscriptPipeline(
   let assembly: AssemblyAIClient | null = null;
   let eleven: ElevenLabsClient | null = null;
   let fallback: WebSpeechFallbackHandle | null = null;
+  // Diarize uploader runs ALONGSIDE the streaming provider — it tees
+  // raw PCM into a buffer and posts to /internal/diarize-batch every
+  // ~30 s + on stop. Result is cached server-side; artifact LLM picks
+  // it up at Generate time. Independent of which streaming provider
+  // wins; runs whenever the mic is on.
+  let diarize: DiarizeUploaderHandle | null = null;
   let provider: ProviderName | null = null;
   let started = false;
   let consecutiveFailures = 0;
@@ -148,6 +158,23 @@ export function createTranscriptPipeline(
       }
       mic = null;
     }
+    if (diarize) {
+      try {
+        await diarize.stop();
+      } catch {
+        /* noop */
+      }
+      diarize = null;
+    }
+  };
+
+  // Set up the parallel diarize uploader once we have a mic. Idempotent:
+  // re-calling it is a no-op so swapping providers doesn't accidentally
+  // create multiple uploaders that each hold the full session audio.
+  const ensureDiarizeUploader = (): DiarizeUploaderHandle => {
+    if (diarize) return diarize;
+    diarize = createDiarizeUploader({ sessionId: opts.sessionId });
+    return diarize;
   };
 
   const swapToWebSpeech = async (reason: FallbackReason, detail?: string) => {
@@ -218,7 +245,11 @@ export function createTranscriptPipeline(
     }
 
     setProvider("elevenlabs");
-    mic.onAudioChunk((pcm16) => eleven?.sendAudio(pcm16));
+    const upl = ensureDiarizeUploader();
+    mic.onAudioChunk((pcm16) => {
+      eleven?.sendAudio(pcm16);
+      upl.push(pcm16);
+    });
     // micCapture.start is idempotent (no-ops if already running), so this
     // is safe whether we re-used the mic from the assembly attempt or it's
     // fresh.
@@ -277,7 +308,11 @@ export function createTranscriptPipeline(
     }
 
     setProvider("assemblyai");
-    mic.onAudioChunk((pcm16) => assembly?.sendAudio(pcm16));
+    const upl = ensureDiarizeUploader();
+    mic.onAudioChunk((pcm16) => {
+      assembly?.sendAudio(pcm16);
+      upl.push(pcm16);
+    });
     await mic.start();
     return true;
   };

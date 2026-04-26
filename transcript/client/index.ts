@@ -20,6 +20,12 @@ export {
 } from "./assemblyAIClient";
 
 export {
+  createDiarizeUploader,
+  type DiarizeUploaderHandle,
+  type DiarizeUploaderOptions,
+} from "./diarizeUploader";
+
+export {
   createMicCapture,
   type MicCaptureHandle,
   type MicCaptureOptions,
