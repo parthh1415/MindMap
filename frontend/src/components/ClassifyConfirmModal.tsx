@@ -50,7 +50,13 @@ export function ClassifyConfirmModal() {
 
   const nodes = useGraphStore((s) => s.nodes);
 
-  const visible = phase === "confirming" || phase === "classifying";
+  // Auto-classify+generate flow: the modal NEVER opens for user
+  // confirmation. Classification picks the best artifact type from
+  // graph + transcript context and we proceed straight to generate.
+  // The component is kept mounted (it still hosts the Esc-to-dismiss
+  // shortcut + section-anchor regenerate hooks accessed elsewhere)
+  // but its render output is suppressed.
+  const visible = false;
 
   const effectiveType: ArtifactType =
     overrideType ?? classifyResult?.top_choice ?? "brief";
