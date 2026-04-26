@@ -33,20 +33,31 @@ const config: UserConfig & { test?: unknown } = {
     strictPort: false,
   },
   optimizeDeps: {
-    // Force-include the AR deps so vite's esbuild converts them through
+    // Force-include the tfjs deps so vite's esbuild converts them through
     // its CJS interop layer. Serving them raw causes Safari (strictest
     // ESM impl) to throw "Can't find variable: module" because the deep
     // tfjs/converter dependency tree contains UMD-wrapped helpers.
     include: [
-      "@tensorflow-models/hand-pose-detection",
       "@tensorflow/tfjs-core",
       "@tensorflow/tfjs-converter",
       "@tensorflow/tfjs-backend-webgl",
     ],
+    // EXCLUDE hand-pose-detection from prebundle on purpose. Esbuild's
+    // resolver doesn't honor vite's resolve.alias for nested bare
+    // imports during prebundle, so it would drop the
+    // `import { Hands } from "@mediapipe/hands"` line entirely
+    // (the real package is an IIFE with zero exports — esbuild
+    // tree-shakes it to nothing). At runtime that surfaces as
+    // 'undefined is not a constructor' when hand-pose-detection's
+    // mediapipe runtime tries `new Hands(config)`.
+    //
+    // Excluding it makes vite serve hand-pose-detection.esm.js raw —
+    // the dev-server's module-import rewriter DOES apply
+    // resolve.alias, so `@mediapipe/hands` correctly resolves to our
+    // mediapipeHandsStub.ts (Proxy → window.Hands).
     exclude: [
-      // tfjs-backend-wasm ships its own .wasm assets and breaks if
-      // pre-bundled — must be served raw.
       "@tensorflow/tfjs-backend-wasm",
+      "@tensorflow-models/hand-pose-detection",
     ],
   },
   test: {
