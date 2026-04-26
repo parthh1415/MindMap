@@ -132,13 +132,17 @@ export function ArtifactPreview() {
             role="dialog"
             aria-label={artifact.title}
             data-testid="artifact-preview"
-            initial={reduce ? false : { opacity: 0, scale: 0.96 }}
+            // Enter from a small point at screen center — picks up
+            // visually where the GenerateSwirlOverlay leaves off
+            // (cited orbs have just coalesced at the same spot, fading
+            // into the now-emerging document).
+            initial={reduce ? false : { opacity: 0, scale: 0.55 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.94 }}
             transition={
               reduce
                 ? { duration: 0 }
-                : { type: "spring", stiffness: 240, damping: 28 }
+                : { type: "spring", stiffness: 220, damping: 24, mass: 0.9 }
             }
             onClick={(e) => e.stopPropagation()}
           >

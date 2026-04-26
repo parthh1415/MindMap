@@ -108,12 +108,21 @@ describe("ArtifactButton", () => {
     // alone picks the doc type, no user confirmation involved.
     expect(JSON.parse(generateInit.body).artifact_type).toBe("prd");
 
-    // Final state: ready with the generated artifact loaded.
+    // Generate landed → we enter the cinematic 'swirl' phase. The
+    // artifact is already loaded; the GenerateSwirlOverlay would
+    // animate the cited orbs to center and then call advanceFromSwirl.
+    // In this unit test the overlay isn't rendered, so we drive that
+    // step manually and then assert the final ready state.
     await waitFor(() => {
-      expect(useArtifactStore.getState().phase).toBe("ready");
+      expect(useArtifactStore.getState().phase).toBe("swirl");
     });
     expect(useArtifactStore.getState().classifyResult?.top_choice).toBe("prd");
     expect(useArtifactStore.getState().activeArtifact?.title).toBe("Auth PRD");
+
+    act(() => {
+      useArtifactStore.getState().advanceFromSwirl();
+    });
+    expect(useArtifactStore.getState().phase).toBe("ready");
   });
 });
 

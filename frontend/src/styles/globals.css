@@ -151,6 +151,18 @@ a {
   background: var(--bg-base);
 }
 
+/* Cinematic swirl: the whole 2D graph dims so the GenerateSwirlOverlay
+ * — ghost orbs converging at center + glowing connecting lines + the
+ * doc silhouette materializing — owns the viewport. Transition is
+ * timed to feel like the room dimming for a presentation. */
+.app-shell.is-swirling main.app-main {
+  filter: brightness(0.32) saturate(0.7);
+  transition: filter 320ms ease-out;
+}
+.app-shell main.app-main {
+  transition: filter 240ms ease-in;
+}
+
 /* Subtle ambient gradient drift, signature-accent tinted.
  * Tuned slightly stronger + a fourth volt-yellow well at the top so the
  * canvas reads more "stage-lit" than "flat dark grey". */

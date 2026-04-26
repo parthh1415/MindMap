@@ -24,6 +24,7 @@ export type Phase =
   | "classifying"
   | "confirming"
   | "generating"
+  | "swirl"      // 1.4s cinematic — cited orbs converge to screen center
   | "ready"
   | "editing";
 
@@ -103,6 +104,9 @@ type ArtifactStore = {
   exitEditor: () => void;
   dismiss: () => void;
   setApiBase: (base: string) => void;
+  /** Called by GenerateSwirlOverlay when its animation finishes;
+   *  flips phase from "swirl" to "ready" so the preview opens. */
+  advanceFromSwirl: () => void;
 };
 
 const DEFAULT_API_BASE =
@@ -299,11 +303,27 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
           (data.session_id as string | undefined) ?? sessionId,
       });
       if (!artifact) throw new Error("invalid artifact response");
+      // Stash the result and enter the cinematic swirl phase. The
+      // GenerateSwirlOverlay reads the artifact's evidence to find
+      // which orbs to animate, plays a ~1.4s converge-to-center
+      // animation, then calls advanceFromSwirl() to flip to "ready"
+      // (which opens the preview modal). If the overlay can't run
+      // for any reason, a fallback timer below still flips us to
+      // ready so the user is never stuck.
       set({
         activeArtifact: artifact,
-        phase: "ready",
+        phase: "swirl",
         pendingDismissed: false,
       });
+      // Safety net: if the swirl overlay fails to advance us within
+      // 3s (no DOM elements found, animation glitched, etc.), force
+      // the transition. The overlay's own happy path advances at
+      // ~1.4s.
+      setTimeout(() => {
+        if (get().phase === "swirl") {
+          set({ phase: "ready" });
+        }
+      }, 3000);
     } catch (err) {
       set({
         phase: "idle",
@@ -440,6 +460,10 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
 
   exitEditor: () => {
     if (get().phase === "editing") set({ phase: "ready" });
+  },
+
+  advanceFromSwirl: () => {
+    if (get().phase === "swirl") set({ phase: "ready" });
   },
 
   dismiss: () => {
