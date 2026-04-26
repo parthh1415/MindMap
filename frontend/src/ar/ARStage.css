@@ -75,18 +75,96 @@
   opacity: 0.6;
 }
 
-.ar-stage .ar-exit {
+/* Top-right control rail. Holds the Expand-on-pinch toggle next to the
+ * Exit AR button so they share alignment + spacing. */
+.ar-stage .ar-controls {
   position: absolute;
   top: 16px;
   right: 16px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+}
+
+.ar-stage .ar-exit {
   background: rgba(6, 9, 13, 0.7);
   border: 1px solid #d6ff3a;
   color: #d6ff3a;
-  font-family: "Space Grotesk", system-ui, sans-serif;
   padding: 8px 14px;
   border-radius: 6px;
   cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: background 0.18s ease, transform 0.18s ease;
+  min-height: 36px;
+}
+.ar-stage .ar-exit:hover {
+  background: rgba(214, 255, 58, 0.12);
+}
+.ar-stage .ar-exit:focus-visible {
+  outline: 2px solid #d6ff3a;
+  outline-offset: 2px;
+}
+
+/* Toggle chip — paired with .ar-exit, same height. State communicated
+ * via colour AND the trailing "On / Off" word so users with low colour
+ * vision still parse it (color-not-only). */
+.ar-stage .ar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(6, 9, 13, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(244, 246, 250, 0.85);
+  padding: 8px 12px 8px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  min-height: 36px;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.ar-stage .ar-toggle:hover {
+  background: rgba(6, 9, 13, 0.85);
+  color: #ffffff;
+}
+.ar-stage .ar-toggle:focus-visible {
+  outline: 2px solid #d6ff3a;
+  outline-offset: 2px;
+}
+.ar-stage .ar-toggle__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.ar-stage .ar-toggle__label strong {
+  font-weight: 700;
+  margin-left: 2px;
+}
+.ar-stage .ar-toggle--on {
+  border-color: rgba(214, 255, 58, 0.55);
+  color: #ffffff;
+}
+.ar-stage .ar-toggle--on .ar-toggle__dot {
+  background: #d6ff3a;
+  box-shadow:
+    0 0 0 1px rgba(214, 255, 58, 0.4) inset,
+    0 0 12px rgba(214, 255, 58, 0.6);
+}
+.ar-stage .ar-toggle--on .ar-toggle__label strong {
+  color: #d6ff3a;
+}
+.ar-stage .ar-toggle--off .ar-toggle__label strong {
+  color: rgba(244, 246, 250, 0.5);
 }
 
 /* Compact pill at top-center that ENABLES hand-tracking when clicked.

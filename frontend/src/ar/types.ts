@@ -46,4 +46,8 @@ export interface GestureFrame {
   zoomDelta: number | null;
   pointerScreen: Vec2 | null;        // overlay-pixel coords of pointer fingertip
   pointerPinchEdge: "down" | "up" | null;  // edge-triggered, fires once per pinch
+  /** True on the single frame the right pinch crosses HOLD_PINCH_MS while
+   *  still pinched. Used to trigger "expand context card" without
+   *  conflicting with the quick-pinch activate edge. */
+  pointerHoldPinch: boolean;
 }

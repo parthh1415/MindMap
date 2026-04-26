@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createGestureController } from "@/ar/gestureControls";
 import type { TrackedHand, Landmark } from "@/ar/types";
 
@@ -210,5 +210,93 @@ describe("gestureController — ctrl swap mid-session", () => {
     if (f.rotateDelta) {
       expect(Math.abs(f.rotateDelta.yaw)).toBeLessThan(0.5);
     }
+  });
+});
+
+describe("gestureController — hold-pinch (right hand) edge", () => {
+  let g: ReturnType<typeof createGestureController>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));
+    g = createGestureController();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // The pointer track binds on its first observation regardless of
+  // pinch state — pinch-edges are only detected once the trackId is
+  // already bound. So every test below starts with a "bind" frame
+  // (ptr open) before the real pinch sequence.
+  const bind = (g2: ReturnType<typeof createGestureController>) => {
+    g2.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, false),
+    ]);
+  };
+
+  it("does not fire pointerHoldPinch on the pinch-down frame", () => {
+    bind(g);
+    const f = g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]);
+    expect(f.pointerPinchEdge).toBe("down");
+    expect(f.pointerHoldPinch).toBe(false);
+  });
+
+  it("fires pointerHoldPinch=true exactly once after HOLD_PINCH_MS of continuous pinch", () => {
+    bind(g);
+    g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]); // pinch-down at t=0
+    // Advance 200 ms — still under threshold, no hold yet.
+    vi.advanceTimersByTime(200);
+    let f = g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]);
+    expect(f.pointerHoldPinch).toBe(false);
+
+    // Cross 350 ms threshold — hold fires this frame.
+    vi.advanceTimersByTime(200);
+    f = g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]);
+    expect(f.pointerHoldPinch).toBe(true);
+
+    // Subsequent frames while still pinched do NOT re-fire — held cleanly.
+    vi.advanceTimersByTime(200);
+    f = g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]);
+    expect(f.pointerHoldPinch).toBe(false);
+  });
+
+  it("releasing then re-pinching restarts the hold timer", () => {
+    bind(g);
+    g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]); // pinch-down at t=0
+    vi.advanceTimersByTime(400);
+    g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]); // hold fires here
+    g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, false),
+    ]); // pinch-up resets timer
+    // New pinch starts; first frame should NOT yet fire hold.
+    const f = g.update([
+      mkHand("a", "control", 100, 100, 0, false),
+      mkHand("b", "pointer", 200, 200, 0, true),
+    ]);
+    expect(f.pointerPinchEdge).toBe("down");
+    expect(f.pointerHoldPinch).toBe(false);
   });
 });
