@@ -117,6 +117,12 @@ const SPRING_STIFFNESS = 0.06;
 const SPRING_DAMPING = 0.82;
 const SETTLE_EPSILON = 0.0008;     // distance² below which we snap + stop animating
 
+// Ambient edges: every orb auto-connects to its K spatially-closest
+// neighbors so the constellation reads as a luminous mesh, even when
+// the topology agent has emitted few explicit edges. Pure visual layer
+// — these are not stored in the graph data, just drawn.
+const KNN_AMBIENT = 5;
+
 // Per-orb animation state stored on userData. Position is ABSOLUTE world.
 interface OrbAnimState {
   target: THREE.Vector3;     // where the force layout wants this orb
@@ -222,6 +228,51 @@ function makeLabelSprite(rawLabel: string): THREE.Sprite {
   // text appears INSIDE the orb's footprint.
   sprite.scale.set(1, 1, 1);
   return sprite;
+}
+
+/**
+ * For each node, find its K spatially-closest siblings and emit those
+ * as additional edges. Deduped (A↔B counts once). Used to densify the
+ * constellation so it reads as a connected mesh of white lines, not
+ * scattered orbs with sparse explicit edges.
+ *
+ * Distance is squared-euclidean (cheap, monotonic — no sqrt needed).
+ * O(N²) is fine for our N (typical sessions <200 nodes).
+ */
+function computeKnnEdges(
+  nodes: LayoutInput[],
+  positions: Record<string, Vec3>,
+  k: number,
+): LayoutEdge[] {
+  if (k <= 0 || nodes.length < 2) return [];
+  const out: LayoutEdge[] = [];
+  const seen = new Set<string>();
+  for (const n of nodes) {
+    const p = positions[n._id];
+    if (!p) continue;
+    const dists: { id: string; d: number }[] = [];
+    for (const m of nodes) {
+      if (m._id === n._id) continue;
+      const q = positions[m._id];
+      if (!q) continue;
+      const dx = p.x - q.x;
+      const dy = p.y - q.y;
+      const dz = p.z - q.z;
+      dists.push({ id: m._id, d: dx * dx + dy * dy + dz * dz });
+    }
+    dists.sort((a, b) => a.d - b.d);
+    for (let i = 0; i < Math.min(k, dists.length); i++) {
+      const target = dists[i]!.id;
+      // Direction-agnostic dedupe: sort the pair before keying so A→B
+      // and B→A collapse into one entry.
+      const key =
+        n._id < target ? `${n._id}|${target}` : `${target}|${n._id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ source_id: n._id, target_id: target });
+    }
+  }
+  return out;
 }
 
 /**
@@ -372,21 +423,35 @@ export function buildScene(
   // wherever their endpoints actually are RIGHT NOW. The RAF loop
   // calls updateEdgePositions() each frame to keep the lines glued
   // to the orbs as they spring outward.
-  // We also store edge endpoint node-ids on the LineSegments userData
-  // so updates can re-look-up positions cheaply.
+  //
+  // Two sources of edges combine into one render:
+  //   1. Explicit edges from the topology agent (what was actually
+  //      asserted in the conversation).
+  //   2. KNN ambient edges — every orb to its K closest neighbors —
+  //      so the constellation reads as a luminous mesh, not scattered
+  //      sparks. Deduped against (1) and against itself.
+  const knnEdges = computeKnnEdges(nodes, positions, KNN_AMBIENT);
   const edgeLineGeom = new THREE.BufferGeometry();
   const edgePairs: [string, string][] = [];
   const edgeVertices: number[] = [];
-  for (const e of edges) {
-    const a = orbSprites.get(e.source_id);
-    const b = orbSprites.get(e.target_id);
-    if (!a || !b) continue;
-    edgePairs.push([e.source_id, e.target_id]);
+  const seenEdgeKeys = new Set<string>();
+  const pushEdge = (sourceId: string, targetId: string) => {
+    const key = sourceId < targetId
+      ? `${sourceId}|${targetId}`
+      : `${targetId}|${sourceId}`;
+    if (seenEdgeKeys.has(key)) return;
+    const a = orbSprites.get(sourceId);
+    const b = orbSprites.get(targetId);
+    if (!a || !b) return;
+    seenEdgeKeys.add(key);
+    edgePairs.push([sourceId, targetId]);
     edgeVertices.push(
       a.position.x, a.position.y, a.position.z,
       b.position.x, b.position.y, b.position.z,
     );
-  }
+  };
+  for (const e of edges) pushEdge(e.source_id, e.target_id);
+  for (const e of knnEdges) pushEdge(e.source_id, e.target_id);
   edgeLineGeom.setAttribute(
     "position",
     new THREE.Float32BufferAttribute(edgeVertices, 3),
