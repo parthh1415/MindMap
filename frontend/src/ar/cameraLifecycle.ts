@@ -136,15 +136,20 @@ export async function startWebcam(
   // If we have a specific device, request it exactly. Otherwise hint
   // facingMode and let the browser pick — we'll re-pick once labels
   // are visible after the first grant.
+  // Resolution: request 1080p ideal (FaceTime HD supports it natively
+  // on modern Macs); browser falls back to whatever the device offers.
+  // Higher framerate helps gesture latency.
   const videoConstraints: MediaTrackConstraints = deviceId
     ? {
         deviceId: { exact: deviceId },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 60 },
       }
     : {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 60 },
         facingMode: "user",
       };
   const stream = await navigator.mediaDevices.getUserMedia({

@@ -64,6 +64,9 @@ export default function ARStage({ onExit }: Props) {
   const [cameraTrying, setCameraTrying] = useState(false);
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
+  // Live debug string showing per-hand role + pinch state — invaluable
+  // when troubleshooting why a gesture doesn't engage.
+  const [handsDebug, setHandsDebug] = useState<string>("hands: 0");
   const { fps, tick, latency } = useFps();
 
   const nodes = useGraphStore(useShallow(selectNodeList));
@@ -128,6 +131,7 @@ export default function ARStage({ onExit }: Props) {
     const target = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
     const current = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
     let highlightedId: string | null = null;
+    let debugFrameCounter = 0;
 
     let handTrackingReady = false;
     type Detector = Awaited<ReturnType<typeof initDetector>>;
@@ -341,6 +345,23 @@ export default function ARStage({ onExit }: Props) {
 
             if (overlayCtx)
               drawHands(overlayCtx, tracks, overlay.width, overlay.height);
+
+            // Throttled debug HUD — every 6 frames (~5 Hz at 30fps).
+            // Surfaces role + pinch state so the user can see why a
+            // gesture isn't engaging without opening the console.
+            debugFrameCounter++;
+            if (debugFrameCounter % 6 === 0) {
+              const lines = tracks.map((t) => {
+                const role = t.role ?? "?";
+                const pinch = t.isPinched ? "PINCH" : `${t.pinchStrength.toFixed(2)}`;
+                return `${role}:${pinch}`;
+              });
+              setHandsDebug(
+                tracks.length === 0
+                  ? "hands: 0"
+                  : `hands: ${tracks.length} ${lines.join(" ")}`,
+              );
+            }
           } catch (err) {
             console.warn("[AR] hand-track frame error:", err);
           }
@@ -401,6 +422,7 @@ export default function ARStage({ onExit }: Props) {
         <span>{latency.toFixed(0)} ms</span>
         <span>nodes {nodes.length}</span>
         <span>active {activatedNodeIds.size}</span>
+        <span>{handsDebug}</span>
         {cameras.length > 1 && cameraReady ? (
           <select
             className="ar-camera-picker"
