@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { NodeEditModal } from "@/components/NodeEditModal";
 import { ImageDropZone } from "@/components/ImageDropZone";
 import { TranscriptStream } from "@/components/TranscriptStream";
+import { LiveSoundwave } from "@/components/LiveSoundwave";
 import { NodeActionMenu } from "@/components/NodeActionMenu";
 import { ExpandButton } from "@/components/ExpandButton";
 import { SynthesizeDrawer } from "@/components/SynthesizeDrawer";
@@ -164,6 +165,7 @@ function MainApp() {
       <ArtifactHistoryBar />
       <NodeEditModal />
       <ImageDropZone />
+      <LiveSoundwave />
       <TranscriptStream />
       <DevPanel />
 
