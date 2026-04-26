@@ -34,4 +34,27 @@ describe("computeLayout", () => {
     expect(Math.abs(cy)).toBeLessThan(0.01);
     expect(Math.abs(cz)).toBeLessThan(0.01);
   });
+
+  // Regression: the underlying d3-force-3d throws "node not found: <id>"
+  // on an edge whose endpoint is missing from the nodes list. ARStage
+  // must filter these BEFORE calling computeLayout — these tests pin
+  // the contract: feed only edges with valid endpoints, no throw; feed
+  // an orphan edge directly, throw with the expected message.
+  it("succeeds when called with the SAME nodes/edges shape ARStage produces (post-filter)", () => {
+    expect(() =>
+      computeLayout(
+        [{ _id: "a", label: "A" }, { _id: "b", label: "B" }],
+        [{ source_id: "a", target_id: "b" }],
+      ),
+    ).not.toThrow();
+  });
+
+  it("throws 'node not found: <id>' when an edge endpoint is missing — confirming the d3-force-3d contract that ARStage's filter relies on", () => {
+    expect(() =>
+      computeLayout(
+        [{ _id: "a", label: "A" }],
+        [{ source_id: "a", target_id: "ghost-id" }],
+      ),
+    ).toThrow(/node not found: ghost-id/);
+  });
 });
