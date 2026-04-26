@@ -203,8 +203,12 @@ export function useForceLayout(
   if (simRef.current === null) {
     const sim = forceSimulation<ForceNodeDatum, ForceLinkDatum>([]);
     configureSimulation(sim, opts);
+    // The tick listener is registered ONCE during the lazy bootstrap above
+    // and fires on the d3-force animation loop (outside React's render).
+    // Reading refs inside it is safe — the lint rule can't statically tell
+    // that this closure executes after render.
+    // eslint-disable-next-line react-hooks/refs
     sim.on("tick", () => {
-      // Keep positionsRef in sync mutably; bump token to trigger React.
       const map = positionsRef.current;
       for (const d of datumByIdRef.current.values()) {
         if (typeof d.x === "number" && typeof d.y === "number") {
@@ -311,10 +315,12 @@ export function useForceLayout(
     simRef.current?.alphaTarget(0);
   };
 
-  return {
-    positions: positionsRef.current,
-    tickToken,
-    pinNode,
-    unpinNode,
-  };
+  // The Map referenced by positionsRef.current is intentionally mutated
+  // in-place by the sim's tick callback — allocating a fresh Map every
+  // ~16ms (60fps) would churn GC. `tickToken` is the React-tracked
+  // identity signal that consumers depend on (see GraphCanvas useMemo
+  // deps), so the live Map's content stays in sync with renders even
+  // though its reference is stable.
+  // eslint-disable-next-line react-hooks/refs
+  return { positions: positionsRef.current, tickToken, pinNode, unpinNode };
 }
