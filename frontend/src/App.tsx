@@ -19,10 +19,12 @@ import { SynthesizeDrawer } from "@/components/SynthesizeDrawer";
 import { BranchNavigator } from "@/components/BranchNavigator";
 import { BranchDiffView } from "@/components/BranchDiffView";
 import { PivotToast } from "@/components/PivotToast";
+import { useArtifactStore } from "@/state/artifactStore";
 import { ClassifyConfirmModal } from "@/components/ClassifyConfirmModal";
 import { ArtifactPreview } from "@/components/ArtifactPreview";
 import { ArtifactEditor } from "@/components/ArtifactEditor";
 import { ArtifactHistoryBar } from "@/components/ArtifactHistoryBar";
+import GenerateSwirlOverlay from "@/components/GenerateSwirlOverlay";
 import { playClick } from "@/lib/sound";
 import { useSessionBootstrap } from "@/integration/sessionBootstrap";
 import { useTranscriptPipeline } from "@/integration/transcriptPipeline";
@@ -46,6 +48,9 @@ function MainApp() {
   const setReducedMotion = useSessionStore((s) => s.setReducedMotion);
   const soundEnabled = useSessionStore((s) => s.soundEnabled);
   const micActive = useSessionStore((s) => s.micActive);
+  // When the artifact-swirl phase is active, dim everything but the
+  // overlay so the cinematic moment owns the viewport.
+  const swirling = useArtifactStore((s) => s.phase) === "swirl";
   const nodes = useNodeList();
   const ghosts = useGhostList();
   // Track the moment mic flipped on so we can detect "talking but no nodes
@@ -135,7 +140,7 @@ function MainApp() {
   const showEmpty = nodes.length === 0 && ghosts.length === 0;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${swirling ? "is-swirling" : ""}`}>
       <div className="ambient-bg" aria-hidden />
       <div className="canvas-vignette" aria-hidden />
       <div className="noise-overlay" aria-hidden />
@@ -153,6 +158,7 @@ function MainApp() {
       <ExpandButton />
       <SynthesizeDrawer />
       <ClassifyConfirmModal />
+      <GenerateSwirlOverlay />
       <ArtifactPreview />
       <ArtifactEditor />
       <ArtifactHistoryBar />
