@@ -28,6 +28,15 @@ const config: UserConfig & { test?: unknown } = {
       "@tensorflow-models/hand-pose-detection",
     ],
   },
+  build: {
+    rollupOptions: {
+      // @mediapipe/hands ships as a browser global script (not a proper ESM
+      // package). It loads itself from solutionPath at runtime — there is no
+      // bundle-time import to resolve. Mark it external so rolldown doesn't
+      // try to parse its non-ESM exports.
+      external: ["@mediapipe/hands"],
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",
