@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { Node as ContractNode } from "@shared/ws_messages";
-import { springEntrance } from "@/lib/motion";
+import { springTap } from "@/lib/motion";
 import { useGraphStore } from "@/state/graphStore";
 
 export type SolidNodeData = {
@@ -9,179 +9,119 @@ export type SolidNodeData = {
   speakerColor: string;
   isActiveSpeaker: boolean;
   isGhostResolution: boolean;
+  /** Set true when another node is hovered and this one is NOT in the
+   *  hovered node's 1-hop neighborhood — Obsidian's signature dim. */
+  dimmed: boolean;
 };
 
 /**
- * Committed graph node, rendered as a real circular mind-map node.
- * Diameter scales with importance (96px → 160px). Label is centered
- * inside; if it's longer than ~14 chars it wraps to two lines and the
- * font shrinks. Speaker color drives an outer glow box-shadow (NOT a
- * flat border) and a 1px inner ring. The ghost→solid morph is wired
- * via a shared `layoutId` (`ghost-<id>-resolves`).
+ * Obsidian-style orb. Small flat-filled circle (12-30px) with a label
+ * rendered BELOW it in muted text. No gradient, no inner glow, no
+ * border decoration — just a solid disc that scales with importance.
+ *
+ * Hover: orb pops to 1.25x and the label sharpens. The dimming of
+ * unconnected orbs happens via the `dimmed` data flag passed in from
+ * GraphCanvas (it tracks which node is hovered and computes neighbors).
+ *
+ * Ghost-resolution morph still uses a shared layoutId.
  */
 export function SolidNode(props: NodeProps<SolidNodeData>) {
-  const { contractNode: node, speakerColor, isActiveSpeaker, isGhostResolution } = props.data;
+  const { contractNode: node, speakerColor, isActiveSpeaker, isGhostResolution, dimmed } = props.data;
   const reduce = useReducedMotion();
 
   const importance = Math.max(0, Math.min(1, node.importance_score));
-  const diameter = Math.round(96 + importance * 64); // 96 → 160px
+  const diameter = Math.round(12 + importance * 18); // 12 → 30px
   const layoutId = isGhostResolution ? `ghost-${node._id}-resolves` : undefined;
 
   const selectNode = useGraphStore((s) => s.selectNode);
-  const hasInfo = node.info.length > 0;
-
-  // Label sizing
-  const long = node.label.length > 14;
-  const labelFontSize = long ? 12 : 14;
 
   return (
-    <motion.button
-      layoutId={layoutId}
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        selectNode(node._id);
-      }}
-      initial={reduce ? false : { opacity: 0, scale: 0.4, filter: "blur(6px)" }}
-      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-      whileHover={reduce ? undefined : { y: -3, scale: 1.04 }}
-      whileTap={reduce ? undefined : { scale: 0.96 }}
-      transition={reduce ? { duration: 0 } : springEntrance}
-      style={{
-        width: diameter,
-        height: diameter,
-        boxShadow: isActiveSpeaker
-          ? `0 0 0 1px ${speakerColor}, 0 0 0 5px ${speakerColor}25, 0 0 36px 6px ${speakerColor}50, 0 8px 24px rgba(0,0,0,0.6)`
-          : `0 0 0 1px ${speakerColor}55, 0 0 22px 4px ${speakerColor}28, 0 4px 16px rgba(0,0,0,0.55)`,
-        ["--node-speaker" as string]: speakerColor,
-      }}
-      className="sn"
-      aria-label={`Node: ${node.label}`}
+    <motion.div
+      className="orb-wrap"
+      animate={{ opacity: dimmed ? 0.22 : 1 }}
+      transition={reduce ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
     >
-      {hasInfo ? (
-        <span className="sn__info-badge tabular" aria-label={`${node.info.length} notes`}>
-          {node.info.length}
-        </span>
-      ) : null}
+      <motion.button
+        layoutId={layoutId}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          selectNode(node._id);
+        }}
+        initial={reduce ? false : { opacity: 0, scale: 0 }}
+        animate={{ opacity: 1, scale: isActiveSpeaker ? 1.18 : 1 }}
+        whileHover={reduce ? undefined : { scale: 1.25 }}
+        whileTap={reduce ? undefined : { scale: 0.92 }}
+        transition={reduce ? { duration: 0 } : springTap}
+        style={{
+          width: diameter,
+          height: diameter,
+          background: speakerColor,
+          // Active speaker gets a subtle ring; otherwise NOTHING — pure flat disc.
+          boxShadow: isActiveSpeaker
+            ? `0 0 0 2px color-mix(in srgb, ${speakerColor} 35%, transparent)`
+            : "none",
+        }}
+        className="orb"
+        aria-label={`Node: ${node.label}`}
+      />
 
-      {node.image_url ? (
-        <motion.div
-          className="sn__image-ring"
-          aria-hidden
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={springEntrance}
-          style={{ backgroundImage: `url(${node.image_url})` }}
-        />
-      ) : null}
-
-      <span
-        className="sn__label"
-        title={node.label}
-        style={{ fontSize: labelFontSize }}
-      >
+      <span className="orb-label" title={node.label} aria-hidden>
         {node.label}
-      </span>
-
-      <span className="sn__importance" aria-hidden>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <span
-            key={i}
-            style={{
-              opacity: i < Math.round(importance * 5) ? 0.95 : 0.18,
-            }}
-          />
-        ))}
       </span>
 
       <Handle type="target" position={Position.Top} className="rf-handle" />
       <Handle type="source" position={Position.Bottom} className="rf-handle" />
 
       <style>{`
-        .sn {
+        .orb-wrap {
           position: relative;
-          padding: 0;
-          border-radius: 999px;
-          background:
-            radial-gradient(circle at 30% 28%,
-              color-mix(in srgb, var(--bg-raised) 70%, var(--node-speaker)) 0%,
-              var(--bg-raised) 55%,
-              color-mix(in srgb, var(--bg-base) 88%, var(--node-speaker)) 100%);
-          color: var(--text-primary);
-          font-family: var(--font-display);
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
           gap: 6px;
-          padding: 10px 14px;
+          /* Re-anchor so reactflow's top-left coordinate places the orb's
+             centre, not the wrap's top edge. The wrap is taller than the
+             orb because of the label. */
+          transform: translate(-50%, -50%);
+          padding-top: 0;
+          padding-bottom: 18px;
+          will-change: transform, opacity;
+        }
+        .orb {
+          padding: 0;
+          border: none;
+          border-radius: 999px;
+          flex-shrink: 0;
+          cursor: pointer;
           will-change: transform, box-shadow;
-          overflow: hidden;
         }
-        .sn__image-ring {
-          position: absolute;
-          inset: 6px;
-          border-radius: 999px;
-          background-size: cover;
-          background-position: center;
-          opacity: 0.85;
-          mix-blend-mode: luminosity;
-        }
-        .sn__info-badge {
-          position: absolute;
-          top: 8px;
-          right: 8px;
-          min-width: 18px; height: 18px;
-          padding: 0 6px;
-          border-radius: 999px;
-          background: var(--signature-accent);
-          color: var(--signature-accent-fg);
-          font-family: var(--font-mono);
-          font-size: 10px;
-          font-weight: 700;
-          display: grid;
-          place-items: center;
-          font-variant-numeric: tabular-nums;
-          box-shadow: 0 0 10px var(--signature-accent-glow);
-        }
-        .sn__label {
-          position: relative;
+        .orb-label {
+          font-family: var(--font-body);
+          font-size: 10.5px;
           font-weight: 500;
-          line-height: 1.18;
-          color: var(--text-primary);
-          text-align: center;
+          color: var(--text-secondary);
           letter-spacing: -0.005em;
-          padding: 0 4px;
-          max-width: 90%;
+          line-height: 1.15;
+          text-align: center;
+          max-width: 140px;
+          white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          word-break: break-word;
-          z-index: 1;
-        }
-        .sn__importance {
-          position: relative;
-          display: inline-flex;
-          gap: 2px;
-          z-index: 1;
-        }
-        .sn__importance > span {
-          width: 8px;
-          height: 2px;
-          border-radius: 1px;
-          background: var(--node-speaker);
+          pointer-events: none;
+          user-select: none;
+          /* readability over the dark canvas without a hard pill bg */
+          text-shadow: 0 1px 4px rgba(0,0,0,0.85);
         }
         .rf-handle {
-          width: 4px;
-          height: 4px;
+          width: 1px;
+          height: 1px;
           background: transparent;
           border: none;
           opacity: 0;
         }
       `}</style>
-    </motion.button>
+    </motion.div>
   );
 }
 

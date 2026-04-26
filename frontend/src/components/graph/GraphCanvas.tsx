@@ -1,13 +1,12 @@
-import { useMemo, useEffect, useCallback } from "react";
+import { useMemo, useEffect, useCallback, useState } from "react";
 import ReactFlow, {
-  Background,
-  BackgroundVariant,
   Controls,
   type Edge as RFEdge,
   type Node as RFNode,
   type NodeTypes,
   type EdgeTypes,
   type NodeDragHandler,
+  type NodeMouseHandler,
   ReactFlowProvider,
 } from "reactflow";
 import "reactflow/dist/style.css";
@@ -66,12 +65,29 @@ function GraphCanvasInner() {
     ghosts,
   );
 
+  // Hover-dim (Obsidian behavior): when a node is hovered, every other
+  // node that's not in its 1-hop neighborhood fades to ~22% opacity, and
+  // edges between non-hovered nodes fade too. The hovered node itself
+  // and its connected edges stay bright.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const neighborSet = useMemo(() => {
+    if (!hoveredId) return null;
+    const n = new Set<string>([hoveredId]);
+    for (const e of edges) {
+      if (e.source_id === hoveredId) n.add(e.target_id);
+      else if (e.target_id === hoveredId) n.add(e.source_id);
+    }
+    return n;
+  }, [hoveredId, edges]);
+
   const rfNodes: RFNode<SolidNodeData | GhostNodeData>[] = useMemo(() => {
     const all: RFNode<SolidNodeData | GhostNodeData>[] = [];
     for (const n of nodes) {
       const pos = positions.get(n._id) ?? { x: 0, y: 0 };
       const speakerColor =
-        (n.speaker_id && speakerColors[n.speaker_id]) || "var(--border-default)";
+        (n.speaker_id && speakerColors[n.speaker_id]) || "var(--text-secondary)";
+      const dimmed = !!neighborSet && !neighborSet.has(n._id);
       all.push({
         id: n._id,
         type: "solid",
@@ -81,6 +97,7 @@ function GraphCanvasInner() {
           speakerColor,
           isActiveSpeaker: !!n.speaker_id && n.speaker_id === activeSpeakerId,
           isGhostResolution: false,
+          dimmed,
         },
         draggable: true,
       });
@@ -99,7 +116,7 @@ function GraphCanvasInner() {
     }
     return all;
     // tickToken is intentionally a dep so positions snapshot is fresh each tick.
-  }, [nodes, ghosts, positions, speakerColors, activeSpeakerId, tickToken]);
+  }, [nodes, ghosts, positions, speakerColors, activeSpeakerId, tickToken, neighborSet]);
 
   const rfEdges: RFEdge<GraphEdgeData>[] = useMemo(() => {
     return edges.map((e) => {
@@ -107,16 +124,20 @@ function GraphCanvasInner() {
       const speakerColor =
         (sourceNode?.speaker_id && speakerColors[sourceNode.speaker_id]) ||
         (e.speaker_id && speakerColors[e.speaker_id]) ||
-        "var(--border-default)";
+        "var(--text-secondary)";
+      // Edge is emphasized iff hovered node is one of its endpoints.
+      const emphasized =
+        !!hoveredId && (e.source_id === hoveredId || e.target_id === hoveredId);
+      const dimmed = !!hoveredId && !emphasized;
       return {
         id: e._id,
         source: e.source_id,
         target: e.target_id,
         type: "graph",
-        data: { edge_type: e.edge_type, speakerColor },
+        data: { edge_type: e.edge_type, speakerColor, emphasized, dimmed },
       };
     });
-  }, [edges, nodes, speakerColors]);
+  }, [edges, nodes, speakerColors, hoveredId]);
 
   // ── drag pinning ─────────────────────────────────────────────────
   const onNodeDragStart: NodeDragHandler = useCallback(
@@ -138,10 +159,16 @@ function GraphCanvasInner() {
     [unpinNode],
   );
 
+  const onNodeMouseEnter: NodeMouseHandler = useCallback((_, node) => {
+    setHoveredId(node.id);
+  }, []);
+  const onNodeMouseLeave: NodeMouseHandler = useCallback(() => {
+    setHoveredId(null);
+  }, []);
+
   return (
     <LayoutGroup id="mindmap-canvas">
       <div className="canvas-wrap">
-        <div className="dot-grid" aria-hidden />
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
@@ -150,6 +177,8 @@ function GraphCanvasInner() {
           onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
+          onNodeMouseEnter={onNodeMouseEnter}
+          onNodeMouseLeave={onNodeMouseLeave}
           fitView
           fitViewOptions={{ padding: 0.4, maxZoom: 1.1, minZoom: 0.3 }}
           minZoom={0.2}
@@ -158,12 +187,6 @@ function GraphCanvasInner() {
           zoomOnScroll
           proOptions={{ hideAttribution: true }}
         >
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={22}
-            size={0.6}
-            color="rgba(148,163,184,0.05)"
-          />
           <Controls position="bottom-right" showInteractive={false} />
         </ReactFlow>
         <style>{`

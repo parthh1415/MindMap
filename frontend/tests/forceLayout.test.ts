@@ -123,7 +123,8 @@ describe("forceLayout helpers", () => {
     expect(sim.force("link")).toBeDefined();
     expect(sim.force("center")).toBeDefined();
     expect(sim.force("collide")).toBeDefined();
-    expect(sim.alphaDecay()).toBeCloseTo(0.025, 5);
+    // Tuned for the Obsidian-feel layout pass (slower decay, floatier).
+    expect(sim.alphaDecay()).toBeCloseTo(0.018, 5);
     sim.stop();
   });
 });

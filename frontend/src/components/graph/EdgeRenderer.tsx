@@ -6,67 +6,60 @@ import { tweenEdgeDraw } from "@/lib/motion";
 export type GraphEdgeData = {
   edge_type: EdgeType;
   speakerColor: string;
+  /** Hover-state from GraphCanvas — true when neither endpoint is in
+   *  the currently-hovered node's neighborhood (Obsidian dim). */
+  dimmed?: boolean;
+  /** True when both endpoints are connected to the hovered node — the
+   *  edge stays bright. */
+  emphasized?: boolean;
 };
 
 /**
- * Custom edge with animated pathLength on mount + gradient stroke tinted
- * by the source-node speaker color.
+ * Obsidian-style edge: a single thin uniform-gray line. No gradient,
+ * no drop-shadow, no per-edge color.
+ *
+ *   default opacity   ≈ 0.10
+ *   emphasized        ≈ 0.55
+ *   dimmed            ≈ 0.04
+ *
+ * pathLength still animates 0→1 on mount so new edges feel drawn rather
+ * than popped.
  */
 export function EdgeRenderer(props: EdgeProps<GraphEdgeData>) {
-  const reduceMotion = useReducedMotion();
+  const reduce = useReducedMotion();
   const {
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    data,
-    markerEnd,
+    id, sourceX, sourceY, targetX, targetY,
+    sourcePosition, targetPosition, data, markerEnd,
   } = props;
 
   const [edgePath] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
+    sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition,
   });
 
-  const stroke = data?.speakerColor ?? "var(--border-default)";
   const dash =
     data?.edge_type === "dashed"
-      ? "8 6"
+      ? "6 4"
       : data?.edge_type === "dotted"
-        ? "2 6"
+        ? "1.5 4"
         : undefined;
 
-  const gradientId = `edge-grad-${id}`;
+  const targetOpacity = data?.dimmed ? 0.04 : data?.emphasized ? 0.55 : 0.1;
 
   return (
     <>
-      <defs>
-        <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity={0.9} />
-          <stop offset="100%" stopColor={stroke} stopOpacity={0.35} />
-        </linearGradient>
-      </defs>
       <motion.path
         id={id}
         d={edgePath}
-        stroke={`url(#${gradientId})`}
-        strokeWidth={1.6}
+        stroke="rgba(232, 237, 242, 1)"
+        strokeWidth={1}
         fill="none"
         strokeDasharray={dash}
         markerEnd={markerEnd}
-        initial={reduceMotion ? { pathLength: 1, opacity: 1 } : { pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={reduceMotion ? { duration: 0 } : tweenEdgeDraw}
-        style={{ filter: `drop-shadow(0 0 4px ${stroke}55)` }}
+        initial={reduce ? { pathLength: 1, opacity: targetOpacity } : { pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: targetOpacity }}
+        transition={reduce ? { duration: 0 } : tweenEdgeDraw}
       />
-      {/* invisible base edge keeps reactflow's hit-testing happy */}
+      {/* Wider invisible hit-area so users can hover/click thin edges. */}
       <BaseEdge id={`${id}-hit`} path={edgePath} style={{ stroke: "transparent", strokeWidth: 12 }} />
     </>
   );

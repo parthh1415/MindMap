@@ -143,23 +143,26 @@ export function configureSimulation(
   sim: Simulation<ForceNodeDatum, ForceLinkDatum>,
   opts: ForceLayoutOptions,
 ): void {
+  // Obsidian-feel: longer links, weaker forces, gentle center, smaller
+  // collision radius (since we're rendering small orbs not big rectangles).
+  // Result: nodes drift instead of snapping; the graph breathes.
   sim
-    .force("charge", forceManyBody<ForceNodeDatum>().strength(-220))
+    .force("charge", forceManyBody<ForceNodeDatum>().strength(-90).distanceMax(420))
     .force(
       "link",
       forceLink<ForceNodeDatum, ForceLinkDatum>()
         .id((d) => d.id)
-        .distance((d) => (d.edge_type === "dotted" ? 220 : 160))
-        .strength(0.6),
+        .distance((d) => (d.edge_type === "dotted" ? 260 : 200))
+        .strength(0.18),
     )
-    .force("center", forceCenter<ForceNodeDatum>(0, 0))
+    .force("center", forceCenter<ForceNodeDatum>(0, 0).strength(0.04))
     .force(
       "collide",
       forceCollide<ForceNodeDatum>().radius(
-        (d) => 60 + (d.importance ?? 0.5) * 30,
-      ),
+        (d) => 16 + (d.importance ?? 0.5) * 14,
+      ).strength(0.85),
     )
-    .alphaDecay(opts.alphaDecay ?? 0.025);
+    .alphaDecay(opts.alphaDecay ?? 0.018);
 }
 
 // ─────────────────────────────────────────────────────────────────────
