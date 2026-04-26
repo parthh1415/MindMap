@@ -95,15 +95,19 @@
   --radius-2xl: 16px;
 
   /* ─── Elevation (layered: tinted ring + drop) ─── */
-  --shadow-sm: 0 0 0 1px rgba(255,255,255,0.04), 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 0 0 1px rgba(255,255,255,0.05), 0 4px 14px rgba(0, 0, 0, 0.55);
-  --shadow-lg: 0 0 0 1px rgba(255,255,255,0.06), 0 12px 36px rgba(0, 0, 0, 0.7);
+  /* Deeper shadows so floating chrome (TopBar/Scrubber/SidePanel)
+   * lifts visibly off the canvas — the vignette layer pushes the
+   * background's perceived darkness, so chrome shadows need to be
+   * stronger for the same lift. */
+  --shadow-sm: 0 0 0 1px rgba(255,255,255,0.04), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 0 0 1px rgba(255,255,255,0.05), 0 6px 18px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 0 0 1px rgba(255,255,255,0.06), 0 18px 48px rgba(0, 0, 0, 0.78);
   --shadow-glow: 0 0 32px var(--signature-accent-glow);
 
   /* ─── Glass surface (shared across TopBar / drawers / modals / scrubber) ─── */
-  --glass-bg: rgba(12, 18, 25, 0.78);
-  --glass-bg-strong: rgba(8, 12, 17, 0.92);
-  --glass-blur: blur(14px) saturate(160%);
+  --glass-bg: rgba(10, 14, 20, 0.74);
+  --glass-bg-strong: rgba(6, 9, 13, 0.92);
+  --glass-blur: blur(16px) saturate(170%);
   --glass-border: 1px solid var(--border-subtle);
 
   /* ─── Display type scale (only for hero / artifact title surfaces) ─── */
