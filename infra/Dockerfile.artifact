@@ -1,0 +1,27 @@
+# Dockerfile for the artifact uagent process.
+# Build context expected: repo root.
+#   docker build -f infra/Dockerfile.artifact -t mindmap-artifact .
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY shared/ /app/shared/
+COPY agents/ /app/agents/
+
+RUN pip install --upgrade pip \
+ && pip install -r /app/agents/requirements.txt
+
+EXPOSE 8005
+
+WORKDIR /app/agents
+
+CMD ["python", "artifact_agent.py"]

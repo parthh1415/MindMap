@@ -16,6 +16,10 @@ import { SynthesizeDrawer } from "@/components/SynthesizeDrawer";
 import { BranchNavigator } from "@/components/BranchNavigator";
 import { BranchDiffView } from "@/components/BranchDiffView";
 import { PivotToast } from "@/components/PivotToast";
+import { ClassifyConfirmModal } from "@/components/ClassifyConfirmModal";
+import { ArtifactPreview } from "@/components/ArtifactPreview";
+import { ArtifactEditor } from "@/components/ArtifactEditor";
+import { ArtifactHistoryBar } from "@/components/ArtifactHistoryBar";
 import { playClick } from "@/lib/sound";
 import { useSessionBootstrap } from "@/integration/sessionBootstrap";
 import { useTranscriptPipeline } from "@/integration/transcriptPipeline";
@@ -101,6 +105,10 @@ function App() {
       <NodeActionMenu />
       <ExpandButton />
       <SynthesizeDrawer />
+      <ClassifyConfirmModal />
+      <ArtifactPreview />
+      <ArtifactEditor />
+      <ArtifactHistoryBar />
       <NodeEditModal />
       <ImageDropZone />
       <TranscriptStream />

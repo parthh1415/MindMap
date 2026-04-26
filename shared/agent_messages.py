@@ -85,3 +85,74 @@ class PivotPoint(Model):
 class PivotResponse(Model):
     session_id: str
     pivots: list[PivotPoint]      # 0..3 candidates per call
+
+
+# -----------------------------------------------------------------------------
+# Artifact generator (Phase 7): turn the live map into a downloadable file
+# (PRD, engineering scaffold, decision doc, retro, action plan, research
+# brief, debate brief, or general one-pager). Two-step flow: classify the
+# session, then project the map through the chosen template.
+# -----------------------------------------------------------------------------
+# 8 fixed types. Keep this list narrow on purpose — generic "doc" is the
+# fallback (`brief`); everything else is opinionated with strong skeletons.
+ARTIFACT_TYPES = (
+    "prd",       # product/feature ideation
+    "scaffold",  # engineering project starter (multi-file zip)
+    "decision",  # comparison / tradeoffs / recommendation
+    "retro",     # what-went-well / what-didn't / actions
+    "action",    # goal / milestones / risks
+    "research",  # exploratory / question-driven
+    "debate",    # multi-speaker disagreement
+    "brief",     # general one-pager fallback
+)
+
+
+class ArtifactClassifyRequest(Model):
+    session_id: str
+    nodes_json: str               # serialized nodes (live or scrubbed snapshot)
+    edges_json: str
+    transcript_excerpt: str       # ~1500 words
+
+
+class ArtifactCandidate(BaseModel := __import__("pydantic").BaseModel):  # noqa: E501
+    type: str                     # one of ARTIFACT_TYPES
+    score: float                  # 0..1
+    why: str                      # one-sentence rationale
+
+
+class ArtifactClassifyResponse(Model):
+    session_id: str
+    top_choice: str               # one of ARTIFACT_TYPES
+    confidence: float             # 0..1
+    candidates: list[dict]        # top 3 [{type, score, why}]
+
+
+class ArtifactGenerateRequest(Model):
+    session_id: str
+    artifact_type: str            # one of ARTIFACT_TYPES
+    nodes_json: str
+    edges_json: str
+    transcript_excerpt: str
+    refinement_hint: str = ""     # "more technical" | "shorter" | "focus on auth" | ""
+    section_anchor: str = ""      # non-empty when regenerating a single H2; matches markdown anchor
+    at_timestamp: str = ""        # ISO; non-empty when generated from a past timeline state
+
+
+class ArtifactFile(__import__("pydantic").BaseModel):
+    path: str                     # e.g. "README.md", "architecture.md", "routes.md"
+    content: str                  # markdown / text
+
+
+class ArtifactEvidenceEntry(__import__("pydantic").BaseModel):
+    section_anchor: str           # H2 slug
+    node_ids: list[str] = []      # graph nodes that justified the section
+    transcript_excerpts: list[str] = []  # quoted lines
+
+
+class ArtifactGenerateResponse(Model):
+    session_id: str
+    artifact_type: str
+    title: str
+    markdown: str                 # the primary file content (for `scaffold`, this is README.md)
+    files: list[dict] = []        # for `scaffold`: extra files [{path, content}]; empty otherwise
+    evidence: list[dict] = []     # [{section_anchor, node_ids, transcript_excerpts}]

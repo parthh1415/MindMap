@@ -1,7 +1,9 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import { GitBranch, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { Files, GitBranch, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { useSessionStore } from "@/state/sessionStore";
+import { ArtifactButton } from "@/components/ArtifactButton";
+import { useArtifactStore } from "@/state/artifactStore";
 
 /**
  * Pinned bar across the top of the canvas. 56 px tall, near-transparent
@@ -85,6 +87,8 @@ export function TopBar() {
         >
           {soundEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
         </button>
+        <ArtifactHistoryButton />
+        <ArtifactButton />
         <motion.button
           type="button"
           className={`topbar-mic ${micActive ? "is-live" : ""}`}
@@ -234,6 +238,26 @@ export function TopBar() {
         }
       `}</style>
     </header>
+  );
+}
+
+/**
+ * Tiny icon-only button that opens the artifact history dropdown. Defined
+ * inline to keep TopBar's wiring contained.
+ */
+function ArtifactHistoryButton() {
+  const openHistory = useArtifactStore((s) => s.openHistory);
+  return (
+    <button
+      type="button"
+      className="topbar-icon"
+      onClick={() => void openHistory()}
+      aria-label="Open artifact history"
+      title="Past artifacts"
+      data-testid="artifact-history-button"
+    >
+      <Files size={14} />
+    </button>
   );
 }
 
