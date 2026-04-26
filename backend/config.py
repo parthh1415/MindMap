@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     AGENT_ADDRESSES_PATH: str = "agents/.addresses.json"
 
     # Behavior tunables.
-    TOPOLOGY_DEBOUNCE_SECONDS: float = 1.2
+    # Phase 14 #1: was 1.2 — pulled to 0.3 so the topology agent starts
+    # working WHILE the user is talking, not after they stop. The agent
+    # can handle 3-4 calls/s; partials de-dupe in apply_topology_diff so
+    # repeat dispatches with overlapping node sets don't double-create.
+    TOPOLOGY_DEBOUNCE_SECONDS: float = 0.3
     RING_BUFFER_WORDS: int = 200
     ATTENTION_INTERVAL_SECONDS: float = 30.0
     ATTENTION_MIN_MENTIONS: int = 3

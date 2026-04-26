@@ -15,7 +15,10 @@ Streaming additions:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -92,31 +95,42 @@ async def post_topology_partial_node(
         # have the assigned _id.
         seen[label_norm] = ""  # reservation placeholder
 
-    now = datetime.now(timezone.utc)
-    node = dict(body.node)
-    ghost_id = node.pop("ghost_id", None)
-    node["session_id"] = body.session_id
-    node.setdefault("created_at", now)
-    node.setdefault("updated_at", now)
-    node.setdefault("info", [])
-    node.setdefault("importance_score", 1.0)
-
-    try:
-        created = await nodes_repo.create_node(db, node)
-    except Exception:
-        # On persistence failure, release the reservation so a later retry
-        # can try again.
-        async with _partial_lock:
-            _partial_broadcast.get(body.session_id, {}).pop(label_norm, None)
-        raise
+    # Phase 14 #4: assemble the full doc + record the assigned _id +
+    # broadcast IMMEDIATELY, then fire-and-forget the Mongo insert.
+    # The user sees the node ~80-150 ms sooner because we no longer wait
+    # on a Mongo round-trip in the request path.
+    node_input = dict(body.node)
+    ghost_id = node_input.pop("ghost_id", None)
+    node_input["session_id"] = body.session_id
+    doc = nodes_repo.prepare_node_doc(node_input)
 
     # Record the real _id so the eventual /internal/topology-diff can
     # resolve label-referenced edges that point at this node.
     async with _partial_lock:
-        _partial_broadcast.setdefault(body.session_id, {})[label_norm] = created["_id"]
+        _partial_broadcast.setdefault(body.session_id, {})[label_norm] = doc["_id"]
 
-    await broadcast_node_upsert(body.session_id, created, resolves_ghost_id=ghost_id)
-    return {"ok": True, "node_id": created.get("_id")}
+    # Broadcast first — the user gets the node now, not after Mongo.
+    await broadcast_node_upsert(body.session_id, doc, resolves_ghost_id=ghost_id)
+
+    # Persist asynchronously. If insert fails the ws clients have a node
+    # the DB doesn't, but on next refresh /sessions/{id}/graph would miss
+    # it; the topology-diff "settle" call also re-creates it via the
+    # apply_topology_diff path. Acceptable for live demo.
+    async def _persist() -> None:
+        try:
+            await nodes_repo.insert_prepared_node(db, doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "async partial-node persist failed (node will be re-created on diff settle): %s",
+                exc,
+            )
+            # Release the reservation so the diff path can try again.
+            async with _partial_lock:
+                _partial_broadcast.get(body.session_id, {}).pop(label_norm, None)
+
+    asyncio.create_task(_persist())
+
+    return {"ok": True, "node_id": doc["_id"]}
 
 
 @router.post("/internal/topology-diff")

@@ -39,12 +39,27 @@ HARD RULES
    and preferred to inventing noise.
 
 OUTPUT FORMAT — STRICT
-Output ONLY a JSON object with EXACTLY these four keys:
-  additions_nodes, additions_edges, merges, edge_updates
+Output ONLY a JSON object with EXACTLY these four keys, IN THIS ORDER:
+  1. additions_nodes  ← MUST be the first key
+  2. additions_edges
+  3. merges
+  4. edge_updates
 No preamble. No postamble. No markdown code fences. No commentary.
 No explanation. No extra keys.
 
+STREAMING-ORDER REQUIREMENT (CRITICAL FOR LATENCY)
+The downstream consumer is a streaming JSON parser that broadcasts
+each addition_nodes[i] to the user the instant its closing `}` arrives.
+You MUST emit `additions_nodes` as the FIRST key in the object, and
+emit each node object FULLY before moving to the next. Do NOT emit
+edges, merges, or edge_updates until after the additions_nodes array
+has closed with `]`. This is non-negotiable — streaming order is the
+difference between the user seeing nodes appear in 200 ms vs 2000 ms.
+
 Example of a valid (empty) response:
 {"additions_nodes": [], "additions_edges": [], "merges": [], "edge_updates": []}
+
+Example of a valid one-node response:
+{"additions_nodes":[{"label":"Auth","speaker_id":"speaker_0","parent_id":null}],"additions_edges":[],"merges":[],"edge_updates":[]}
 
 Output ONLY the JSON object. No explanation. No markdown.

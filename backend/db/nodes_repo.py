@@ -27,8 +27,13 @@ def _live_filter(extra: Optional[dict] = None) -> dict:
     return base
 
 
-async def create_node(db: AsyncIOMotorDatabase, node: dict) -> dict:
-    """Insert a node. Assigns ``_id`` and timestamps if absent."""
+def prepare_node_doc(node: dict) -> dict:
+    """Build a fully-formed node document WITHOUT touching Mongo.
+
+    Same defaults as :func:`create_node` (assigns ``_id``, timestamps,
+    info, importance) but pure-CPU. Lets callers broadcast over WS
+    *before* paying the Mongo round-trip — see Phase 14 #4.
+    """
     doc: dict[str, Any] = dict(node)
     doc.setdefault("_id", _new_id())
     now = _utcnow()
@@ -36,7 +41,18 @@ async def create_node(db: AsyncIOMotorDatabase, node: dict) -> dict:
     doc.setdefault("updated_at", now)
     doc.setdefault("info", [])
     doc.setdefault("importance_score", 1.0)
+    return doc
+
+
+async def insert_prepared_node(db: AsyncIOMotorDatabase, doc: dict) -> None:
+    """Persist a doc that was already built by :func:`prepare_node_doc`."""
     await db.nodes.insert_one(doc)
+
+
+async def create_node(db: AsyncIOMotorDatabase, node: dict) -> dict:
+    """Insert a node. Assigns ``_id`` and timestamps if absent."""
+    doc = prepare_node_doc(node)
+    await insert_prepared_node(db, doc)
     return doc
 
 
