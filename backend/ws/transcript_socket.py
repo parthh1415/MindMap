@@ -52,7 +52,11 @@ async def _build_graph_json(session_id: str) -> str:
 async def _maybe_dispatch_topology(session_id: str, speaker_id: str) -> None:
     settings = get_settings()
     buf = get_buffer()
-    if not buf.should_dispatch_topology(session_id, settings.TOPOLOGY_DEBOUNCE_SECONDS):
+    if not buf.should_dispatch_topology(
+        session_id,
+        settings.TOPOLOGY_DEBOUNCE_SECONDS,
+        min_new_words=settings.TOPOLOGY_MIN_NEW_WORDS,
+    ):
         return
     snapshot = buf.snapshot(session_id)
     graph_json = await _build_graph_json(session_id)

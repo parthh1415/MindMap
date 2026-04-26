@@ -111,10 +111,13 @@ async def _run_diarize(session_id: str, audio_bytes: bytes) -> None:
             # 4. Compress to per-speaker utterances + cache.
             words = data.get("words") or []
             # AssemblyAI also returns its own 'utterances' field; prefer
-            # that when present (already speaker-segmented).
+            # that when present (already speaker-segmented). Always pass
+            # the result through phantom-switch absorption so single-word
+            # diarization glitches (a stray "yeah" labelled as a third
+            # speaker) get folded back into the surrounding speaker.
             aai_utts = data.get("utterances")
             if isinstance(aai_utts, list) and aai_utts:
-                utterances = [
+                normalised = [
                     {
                         "speaker": u.get("speaker", "?"),
                         "text": (u.get("text") or "").strip(),
@@ -123,6 +126,7 @@ async def _run_diarize(session_id: str, audio_bytes: bytes) -> None:
                     }
                     for u in aai_utts
                 ]
+                utterances = diarize_cache._absorb_phantom_switches(normalised)
             else:
                 utterances = diarize_cache.words_to_utterances(words)
 

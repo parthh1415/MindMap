@@ -115,6 +115,12 @@ function classifyClose(code: number, reason: string): AssemblyAIError["kind"] {
  * Pick the dominant speaker label across the words of a turn. AssemblyAI
  * v3 emits `speaker` per word; falls back to `speaker_default` when no
  * diarization signal is present (e.g. single-speaker mode).
+ *
+ * STATELESS — every call is independent. AssemblyAI's clustering can
+ * relabel a returning speaker mid-session (A → C), which causes the
+ * orb colour palette to shuffle identities even though the human is
+ * the same person. For accurate multi-speaker tracking, prefer the
+ * stateful `createSpeakerResolver()` below.
  */
 export function dominantSpeakerOfTurn(
   words: Array<{ speaker?: string | number | null }> | undefined,
@@ -139,6 +145,150 @@ export function dominantSpeakerOfTurn(
   return best;
 }
 
+export interface SpeakerResolver {
+  /**
+   * Resolve a turn's words to a stable speaker_id. Applies a confidence
+   * floor + sticky-prev rule for short / contested turns and remaps
+   * AssemblyAI's volatile cluster labels to stable `speaker_N` ids in
+   * order of first appearance.
+   */
+  resolve(
+    words: Array<{ speaker?: string | number | null }> | undefined,
+    isFinal: boolean,
+  ): string;
+  /**
+   * Resolve a single raw turn-level speaker label directly. Used by
+   * providers that emit one trusted speaker per turn (e.g. ElevenLabs
+   * Scribe) rather than a tally of per-word labels. Skips the
+   * confidence/short-turn gates — those are designed to suppress
+   * per-word noise, which doesn't apply when the provider has already
+   * decided. Still reuses the SAME idMap as `resolve()` so providers
+   * that mix paths share consistent stable IDs.
+   */
+  resolveLabel(rawLabel: string | number | null | undefined, isFinal: boolean): string;
+  /** Inspect-only — used in tests. */
+  state(): {
+    idMap: Record<string, string>;
+    lastFinalSpeaker: string | null;
+    nextIndex: number;
+  };
+}
+
+/**
+ * Confidence threshold below which a turn's "winning" speaker is rejected
+ * and we stick to the previous speaker. 0.6 means the top label must
+ * carry at least 60% of the words; otherwise the turn is too contested
+ * to trust (typical case: a 2-word interjection misclassified across two
+ * adjacent words). Tuned conservatively — the cost of sticking is "wrong
+ * speaker on one short turn"; the cost of NOT sticking is the colour
+ * palette shuffling on every "uh-huh".
+ */
+const SPEAKER_CONFIDENCE_FLOOR = 0.6;
+/** A turn must carry at least this many words to even attempt to switch
+ *  speakers. Below this, we always stick to the previous speaker. */
+const SPEAKER_MIN_WORDS_TO_SWITCH = 3;
+
+export function createSpeakerResolver(): SpeakerResolver {
+  // AAi raw label (e.g. "A", "0", "B") → stable id (e.g. "speaker_0").
+  // Assigned in order of first appearance, so speaker_0 is whoever
+  // spoke first this session, regardless of how AAi later relabels.
+  const idMap = new Map<string, string>();
+  let nextIndex = 0;
+  // Last id we accepted on a FINAL turn. Partial turns don't update
+  // this — partials are unstable and would otherwise pin us to a
+  // mid-utterance guess. This is also what we "stick to" for short
+  // / low-confidence turns.
+  let lastFinalSpeaker: string | null = null;
+
+  const stableFor = (rawKey: string): string => {
+    const existing = idMap.get(rawKey);
+    if (existing) return existing;
+    const stable = `speaker_${nextIndex}`;
+    nextIndex += 1;
+    idMap.set(rawKey, stable);
+    return stable;
+  };
+
+  return {
+    resolve(words, isFinal) {
+      if (!words || words.length === 0) {
+        return lastFinalSpeaker ?? "speaker_default";
+      }
+
+      // Tally raw labels.
+      let labelled = 0;
+      const tally = new Map<string, number>();
+      for (const w of words) {
+        const s = w.speaker;
+        if (s === null || s === undefined) continue;
+        const key = typeof s === "number" ? String(s) : String(s);
+        tally.set(key, (tally.get(key) ?? 0) + 1);
+        labelled += 1;
+      }
+      if (tally.size === 0 || labelled === 0) {
+        return lastFinalSpeaker ?? "speaker_default";
+      }
+
+      // Pick the winning raw label.
+      let bestRaw: string | null = null;
+      let bestCount = -1;
+      for (const [k, v] of tally) {
+        if (v > bestCount) {
+          bestRaw = k;
+          bestCount = v;
+        }
+      }
+
+      const winnerShare = bestCount / labelled;
+      const tooShort = labelled < SPEAKER_MIN_WORDS_TO_SWITCH;
+      const tooContested = winnerShare < SPEAKER_CONFIDENCE_FLOOR;
+      // First-seen raw label = a new speaker entering the conversation.
+      // Stickiness exists to suppress short interjections from already-
+      // detected speakers, but it must NOT block a brand-new voice from
+      // being registered — that would cap the conversation at whoever
+      // happened to talk longest first. New speakers commit eagerly.
+      const isNewSpeaker = bestRaw != null && !idMap.has(bestRaw);
+
+      // Stick to previous speaker for short or contested turns — but
+      // only when (a) we already have a previous speaker AND (b) the
+      // dominant label is one we've seen before. First-ever turn and
+      // first-ever appearance of a new label always commit.
+      if (
+        (tooShort || tooContested) &&
+        lastFinalSpeaker &&
+        !isNewSpeaker
+      ) {
+        return lastFinalSpeaker;
+      }
+
+      const stable = bestRaw ? stableFor(bestRaw) : "speaker_default";
+      // Only commit on finals — partials shouldn't move the sticky
+      // anchor since AAi's per-word labels can flicker mid-turn.
+      if (isFinal) lastFinalSpeaker = stable;
+      return stable;
+    },
+    resolveLabel(rawLabel, isFinal) {
+      if (rawLabel === null || rawLabel === undefined) {
+        return lastFinalSpeaker ?? "speaker_default";
+      }
+      const key = String(rawLabel);
+      if (!key) {
+        return lastFinalSpeaker ?? "speaker_default";
+      }
+      const stable = stableFor(key);
+      if (isFinal) lastFinalSpeaker = stable;
+      return stable;
+    },
+    state() {
+      return {
+        idMap: Object.fromEntries(idMap),
+        lastFinalSpeaker,
+        nextIndex,
+      };
+    },
+  };
+}
+
 /**
  * Parse one server message (already JSON.parsed) into a TranscriptChunk
  * if it represents transcription content. Returns null for keep-alives
@@ -147,6 +297,7 @@ export function dominantSpeakerOfTurn(
 export function parseAssemblyMessage(
   raw: unknown,
   sessionId: string,
+  resolver?: SpeakerResolver,
 ): TranscriptChunk | null {
   if (!raw || typeof raw !== "object") return null;
   const msg = raw as Record<string, unknown>;
@@ -173,7 +324,13 @@ export function parseAssemblyMessage(
     return {
       type: "transcript",
       session_id: sessionId,
-      speaker_id: dominantSpeakerOfTurn(words),
+      // Stateful resolver (preferred) is per-session, gives stable IDs
+      // across the whole conversation, applies a confidence floor, and
+      // sticks short/contested turns to the previous speaker. Stateless
+      // fallback only kicks in when no resolver was passed (tests).
+      speaker_id: resolver
+        ? resolver.resolve(words, !!isFinal)
+        : dominantSpeakerOfTurn(words),
       text,
       is_final: !!isFinal,
       ts_client: Date.now(),
@@ -211,6 +368,9 @@ export function createAssemblyAIClient(
   const tokenUrl = opts.tokenUrl;
   const sessionId = opts.sessionId;
   const speechModel = opts.speechModel ?? "universal-streaming-english";
+  // One resolver per client lifetime — stable across reconnects within
+  // the same session so a network blip doesn't reshuffle speaker IDs.
+  const speakerResolver = createSpeakerResolver();
 
   const internal: InternalState = {
     socket: null,
@@ -355,7 +515,7 @@ export function createAssemblyAIClient(
           emitError({ kind, message, code, raw: parsed });
           return;
         }
-        const chunk = parseAssemblyMessage(parsed, sessionId);
+        const chunk = parseAssemblyMessage(parsed, sessionId, speakerResolver);
         if (chunk) emitChunk(chunk);
       });
 
@@ -475,6 +635,7 @@ export function createAssemblyAIClient(
 export const __test__ = {
   parseAssemblyMessage,
   dominantSpeakerOfTurn,
+  createSpeakerResolver,
   classifyClose,
   DEFAULT_ENDPOINT,
 };
