@@ -32,7 +32,7 @@ export function computeLayout(
 
   const sim = forceSimulation(simNodes, 3)
     .force("charge", forceManyBody().strength(-30))
-    .force("link", forceLink(simLinks).id((d: SimNode) => d.id).distance(1.0))
+    .force("link", forceLink(simLinks).id((d) => (d as SimNode).id).distance(1.0))
     .force("center", forceCenter(0, 0, 0))
     .stop();
 
