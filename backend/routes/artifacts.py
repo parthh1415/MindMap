@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from backend import agent_artifact_client
 from backend.db import artifacts_repo, edges_repo, nodes_repo
 from backend.db.client import get_db
+from backend import diarize_cache
 from backend.ring_buffer import get_buffer
 
 from shared.agent_messages import ARTIFACT_TYPES
@@ -108,10 +109,24 @@ async def _gather_payload(
     nodes_json = json.dumps(_isoformat(nodes), default=str)
     edges_json = json.dumps(_isoformat(edges), default=str)
 
+    # Prefer the speaker-diarized transcript when the parallel batch
+    # job has populated it for this session. Falls back to the live
+    # ring buffer if diarization isn't ready yet — the artifact LLM
+    # then runs exactly like Phase 12 (no speaker context, no extra
+    # latency). This is the "zero added latency" promise.
+    transcript = ""
     try:
-        transcript = get_buffer().snapshot(session_id)
+        diarized = await diarize_cache.get(session_id)
+        if diarized:
+            transcript = diarize_cache.format_for_prompt(diarized)
     except Exception:  # noqa: BLE001
         transcript = ""
+
+    if not transcript:
+        try:
+            transcript = get_buffer().snapshot(session_id)
+        except Exception:  # noqa: BLE001
+            transcript = ""
 
     return nodes_json, edges_json, transcript, parsed_at
 

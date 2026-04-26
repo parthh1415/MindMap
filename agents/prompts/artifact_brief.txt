@@ -48,3 +48,10 @@ Output ONLY a JSON object:
 }
 No preamble. No postamble. No fences around the JSON.
 Output ONLY the JSON object.
+
+SPEAKER ATTRIBUTION
+When TRANSCRIPT_EXCERPT lines are prefixed with "Speaker A:", "Speaker B:",
+etc., the document MUST credit who said what where it adds clarity (e.g.
+who proposed an option, who raised a concern, who is on each side of a
+disagreement). When the transcript has no "Speaker X:" prefixes, write
+without speaker attribution — do NOT invent speakers.
