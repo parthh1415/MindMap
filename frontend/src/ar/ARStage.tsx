@@ -25,6 +25,9 @@ import {
   disposeScene,
   setNodeColor,
   projectNodeToScreen,
+  updateAnimations,
+  updateEdgePositions,
+  captureCurrentPositions,
   type SceneRefs,
 } from "./graph3d";
 import { drawHands } from "./handDrawing";
@@ -77,6 +80,11 @@ export default function ARStage({ onExit }: Props) {
   const detectorRef = useRef<Detector | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const sceneRef = useRef<SceneRefs | null>(null);
+  // Positions cache — preserves orb positions across scene rebuilds so
+  // existing orbs don't jump back to center every time a new node
+  // arrives mid-session. Newly-added orb ids that aren't in this Map
+  // bloom from (0,0,0). Updated on dispose, used on next build.
+  const knownPositionsRef = useRef<Map<string, THREE.Vector3>>(new Map());
   const overlayCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   const toggleActivatedRef = useRef(toggleActivated);
@@ -258,10 +266,21 @@ export default function ARStage({ onExit }: Props) {
       .map((e) => ({ source_id: e.source_id, target_id: e.target_id }));
 
     const positions = computeLayout(layoutNodes, layoutEdges);
-    const scene = buildScene(gc, layoutNodes, layoutEdges, positions);
+    // Build using the previous-known-positions cache. Existing orbs
+    // resume where they left off; new orbs bloom from (0,0,0).
+    const scene = buildScene(
+      gc,
+      layoutNodes,
+      layoutEdges,
+      positions,
+      knownPositionsRef.current,
+    );
     sceneRef.current = scene;
 
     return () => {
+      // Snapshot the orbs' current positions BEFORE disposing so the
+      // next rebuild (e.g., when a new node arrives) preserves them.
+      knownPositionsRef.current = captureCurrentPositions(scene);
       disposeScene(scene);
       sceneRef.current = null;
     };
@@ -463,6 +482,12 @@ export default function ARStage({ onExit }: Props) {
       current.camZ += (target.camZ - current.camZ) * ZOOM_CAMERA_DAMPING;
 
       if (scene) {
+        // Step the bloom-from-center spring physics. Rewrite the edge
+        // line buffer ONLY while orbs are still in motion — once the
+        // constellation has settled there's nothing to redraw.
+        const stillBlooming = updateAnimations(scene);
+        if (stillBlooming) updateEdgePositions(scene);
+
         const eul = new THREE.Euler(current.pitch, current.yaw, 0, "YXZ");
         scene.graphRoot.quaternion.setFromEuler(eul);
         scene.camera.position.z = current.camZ;
