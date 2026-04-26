@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Handle, Position, type NodeProps } from "reactflow";
 
@@ -12,7 +13,7 @@ export type GhostNodeData = {
  * italic label below. Shares `layoutId={ghost_id}` with the eventual
  * SolidNode so Framer Motion morphs it into the solid in place.
  */
-export function GhostNode(props: NodeProps<GhostNodeData>) {
+function GhostNodeImpl(props: NodeProps<GhostNodeData>) {
   const { ghost_id, label, speakerColor } = props.data;
   const reduce = useReducedMotion();
 
@@ -55,20 +56,26 @@ export function GhostNode(props: NodeProps<GhostNodeData>) {
           padding-bottom: 22px;
         }
         .ghost-orb {
-          /* Bigger + brighter than the original Obsidian-pure 14px dashed
-           * outline: real-speech ghosts need to be *seen* during a 2-3
-           * second window so the user notices them appear before the
-           * topology agent commits a real node. */
-          width: 22px;
-          height: 22px;
+          /* Visually paired with SolidNode: same lit-sphere gradient
+             but kept translucent + dashed-rimmed so it still reads as
+             "tentative". The halo box-shadow is softer than a solid
+             so a ghost never out-shines a real node. */
+          width: 24px;
+          height: 24px;
           border-radius: 999px;
           border: 1.5px dashed var(--gs);
           background:
-            radial-gradient(circle at 35% 35%,
-              color-mix(in srgb, var(--gs) 32%, transparent) 0%,
-              color-mix(in srgb, var(--gs) 12%, transparent) 70%,
-              transparent 100%);
-          box-shadow: 0 0 12px color-mix(in srgb, var(--gs) 35%, transparent);
+            radial-gradient(
+              circle at 32% 30%,
+              color-mix(in srgb, var(--gs) 18%, #ffffff 5%) 0%,
+              color-mix(in srgb, var(--gs) 35%, transparent) 45%,
+              color-mix(in srgb, var(--gs) 14%, transparent) 80%,
+              transparent 100%
+            );
+          box-shadow:
+            0 0 10px color-mix(in srgb, var(--gs) 30%, transparent),
+            0 0 22px color-mix(in srgb, var(--gs) 18%, transparent),
+            inset 0 0 4px color-mix(in srgb, #ffffff 25%, transparent);
           flex-shrink: 0;
         }
         .ghost-orb-label {
@@ -99,5 +106,18 @@ export function GhostNode(props: NodeProps<GhostNodeData>) {
     </div>
   );
 }
+
+/** Skip body re-render unless visual fields change — same reasoning
+ *  as SolidNode: reactflow passes fresh data literals every tick. */
+export const GhostNode = memo(GhostNodeImpl, (prev, next) => {
+  if (prev.id !== next.id) return false;
+  const a = prev.data;
+  const b = next.data;
+  return (
+    a.ghost_id === b.ghost_id &&
+    a.label === b.label &&
+    a.speakerColor === b.speakerColor
+  );
+});
 
 export default GhostNode;

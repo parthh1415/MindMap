@@ -21,8 +21,11 @@ import { useForceLayout } from "@/lib/forceLayout";
 import SolidNode, { type SolidNodeData } from "./SolidNode";
 import GhostNode, { type GhostNodeData } from "./GhostNode";
 import EdgeRenderer, { type GraphEdgeData } from "./EdgeRenderer";
-import PredictiveEdgesLayer from "./PredictiveEdgesLayer";
-import SpeakerTrailsLayer from "./SpeakerTrailsLayer";
+// Predictive-edge + speaker-trail overlays were dropped: their orange/
+// amber dashed beziers and polylines (speaker colors mapped to copper
+// + amber palette tokens) read as visual noise during transcription.
+// The real orb-spawn + white-edge-connect flow is already what we want
+// — driven by topology-agent node_upsert + edge_upsert events.
 import { usePredictiveEdgePruner } from "@/lib/predictiveEdges";
 import { useTrailDecayer } from "@/lib/speakerTrail";
 
@@ -79,12 +82,17 @@ function GraphCanvasInner() {
   const activeSpeakerId = useGraphStore((s) => s.activeSpeakerId);
   const animationQueue = useGraphStore((s) => s.animationQueue);
 
-  // strip queue every render frame after consumption (next tick)
+  // Strip queue once SolidNode has had time to read it on first paint.
+  // 50 ms was too tight: under WebSocket bursts, a node could arrive,
+  // its SolidNode mount, *and* the queue clear all happen before the
+  // mount-only `queuedOnMount` useMemo could read it — so freshly-
+  // arrived orbs occasionally missed their pulse. 250 ms is still
+  // imperceptible to the user but safely outside React's batching.
   useEffect(() => {
     if (animationQueue.length === 0) return;
     const t = window.setTimeout(() => {
       useGraphStore.setState({ animationQueue: [] });
-    }, 50);
+    }, 250);
     return () => window.clearTimeout(t);
   }, [animationQueue]);
 
@@ -112,12 +120,21 @@ function GraphCanvasInner() {
     return n;
   }, [hoveredId, edges]);
 
+  // SolidNode/GhostNode are wrapped in React.memo so position-only
+  // updates per tick don't re-render their bodies — reactflow updates
+  // the wrapper transform via CSS and React skips the node body.
+  // That's where the streaming-generation lag was coming from: every
+  // d3-force tick passed fresh `data` object literals, which (without
+  // memo) cascaded into each orb re-painting its glow + spec layers.
   const rfNodes: RFNode<SolidNodeData | GhostNodeData>[] = useMemo(() => {
     const all: RFNode<SolidNodeData | GhostNodeData>[] = [];
     for (const n of nodes) {
       const pos = positions.get(n._id) ?? seedPosition(n._id);
+      // Concrete hex (mirrors --text-secondary): the orb gradient uses
+      // color-mix(), which fails silently with nested var() in some
+      // browsers, leaving the orb body transparent.
       const speakerColor =
-        (n.speaker_id && speakerColors[n.speaker_id]) || "var(--text-secondary)";
+        (n.speaker_id && speakerColors[n.speaker_id]) || "#a0aab5";
       const dimmed = !!neighborSet && !neighborSet.has(n._id);
       all.push({
         id: n._id,
@@ -135,7 +152,8 @@ function GraphCanvasInner() {
     }
     for (const g of ghosts) {
       const pos = positions.get(g.ghost_id) ?? seedPosition(g.ghost_id);
-      const speakerColor = speakerColors[g.speaker_id] || "var(--signature-accent)";
+      // Concrete hex (mirrors --signature-accent) — see comment above.
+      const speakerColor = speakerColors[g.speaker_id] || "#d6ff3a";
       all.push({
         id: g.ghost_id,
         type: "ghost",
@@ -146,7 +164,10 @@ function GraphCanvasInner() {
       });
     }
     return all;
-    // tickToken is intentionally a dep so positions snapshot is fresh each tick.
+    // tickToken IS a dep so reactflow gets fresh positions every tick.
+    // The win comes from React.memo on SolidNode/GhostNode (custom
+    // shallow comparator) — they skip body re-renders unless their data
+    // actually changed, even though the wrapper allocates new RFNodes.
   }, [nodes, ghosts, positions, speakerColors, activeSpeakerId, tickToken, neighborSet]);
 
   const rfEdges: RFEdge<GraphEdgeData>[] = useMemo(() => {
@@ -155,7 +176,7 @@ function GraphCanvasInner() {
       const speakerColor =
         (sourceNode?.speaker_id && speakerColors[sourceNode.speaker_id]) ||
         (e.speaker_id && speakerColors[e.speaker_id]) ||
-        "var(--text-secondary)";
+        "#a0aab5";
       // Edge is emphasized iff hovered node is one of its endpoints.
       const emphasized =
         !!hoveredId && (e.source_id === hoveredId || e.target_id === hoveredId);
@@ -212,14 +233,31 @@ function GraphCanvasInner() {
           onNodeMouseLeave={onNodeMouseLeave}
           fitView
           fitViewOptions={{ padding: 0.4, maxZoom: 1.1, minZoom: 0.3 }}
-          minZoom={0.2}
+          // Viewport clamp — `translateExtent` defines the world-space
+          // rectangle the viewport center is allowed to occupy. With
+          // minZoom=0.4 the visible viewport at extreme zoom-out is
+          // roughly the container size / 0.4 (≈ 3000 px wide on a
+          // 1200px container), and the extent ±1200 keeps that window
+          // overlapping the d3-force cluster (which the simulation's
+          // center force pulls toward origin) at every position.
+          //
+          // Why this matters: previously the viewport was unconstrained.
+          // Drag + zoom out could put the orbs entirely outside the
+          // visible frame — the orbs were still in the DOM, opacity 1,
+          // scale 1, just at world coordinates the viewport no longer
+          // intersected. Window resize "fixed" it by triggering reactflow's
+          // resize observer, which incidentally re-anchored the user's
+          // perception of the canvas. The clamp solves that root cause.
+          translateExtent={[
+            [-1200, -1200],
+            [1200, 1200],
+          ]}
+          minZoom={0.4}
           maxZoom={2}
           panOnDrag
           zoomOnScroll
           proOptions={{ hideAttribution: true }}
         >
-          <SpeakerTrailsLayer positions={positions} />
-          <PredictiveEdgesLayer positions={positions} />
           <Controls position="bottom-right" showInteractive={false} />
         </ReactFlow>
         <style>{`
