@@ -101,6 +101,10 @@ type GraphStore = {
 
   // ── reset ──
   resetGraph: () => void;
+
+  // ── activated nodes (used by AR/3D view; pinch toggles membership) ──
+  activatedNodeIds: Set<string>;
+  toggleActivated: (node_id: string) => void;
 };
 
 let _ghostCounter = 0;
@@ -135,6 +139,7 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
   speakerColors: {},
   activeSpeakerId: null,
   animationQueue: [],
+  activatedNodeIds: new Set<string>(),
 
   applyGraphEvent: (e) => {
     switch (e.type) {
@@ -308,6 +313,14 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
       return { speakerTrails: { ...s.speakerTrails, [speaker_id]: next } };
     }),
 
+  toggleActivated: (node_id) =>
+    set((s) => {
+      const next = new Set(s.activatedNodeIds);
+      if (next.has(node_id)) next.delete(node_id);
+      else next.add(node_id);
+      return { activatedNodeIds: next };
+    }),
+
   resetGraph: () =>
     set({
       nodes: {},
@@ -320,6 +333,7 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
       animationQueue: [],
       speakerColors: {},
       activeSpeakerId: null,
+      activatedNodeIds: new Set<string>(),
     }),
 }));
 
