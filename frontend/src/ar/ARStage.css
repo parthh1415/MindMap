@@ -69,3 +69,56 @@
   border-radius: 6px;
   cursor: pointer;
 }
+
+/* Centered banner shown only in mouse mode — invites the user to enable
+   the camera (or surfaces the error from the most recent attempt). */
+.ar-stage .ar-camera-banner {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  max-width: 480px;
+  padding: 16px 20px;
+  background: rgba(6, 9, 13, 0.85);
+  border: 1px solid rgba(214, 255, 58, 0.35);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  text-align: center;
+  font-family: "DM Sans", system-ui, sans-serif;
+}
+.ar-stage .ar-camera-banner p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e6edf3;
+}
+.ar-stage .ar-camera-error {
+  color: #ffae3d;
+}
+.ar-stage .ar-camera-hint {
+  color: #d6ff3a;
+}
+.ar-stage .ar-camera-retry {
+  background: #d6ff3a;
+  color: #06090d;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.ar-stage .ar-camera-retry:disabled {
+  background: rgba(214, 255, 58, 0.4);
+  cursor: wait;
+}
+.ar-stage .ar-camera-retry:hover:not(:disabled) {
+  background: #c4ed28;
+}

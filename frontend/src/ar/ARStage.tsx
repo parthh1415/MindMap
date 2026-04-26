@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGraphStore, selectNodeList, selectEdgeList } from "@/state/graphStore";
 import { useShallow } from "zustand/react/shallow";
-import { startWebcam, stopWebcam } from "./cameraLifecycle";
+import { startWebcam, stopWebcam, describeCameraError } from "./cameraLifecycle";
 import {
   initDetector,
   disposeDetector,
@@ -43,7 +43,23 @@ export default function ARStage({ onExit }: Props) {
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("starting…");
   const [inputMode, setInputMode] = useState<"camera" | "mouse">("mouse");
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraTrying, setCameraTrying] = useState(false);
   const { fps, tick, latency } = useFps();
+
+  // Exposed by Effect 1 so the "Retry Camera" button can re-attempt
+  // without restarting the scene + RAF loop.
+  const retryCameraRef = useRef<(() => Promise<void>) | null>(null);
+
+  const handleRetryCamera = async () => {
+    if (cameraTrying) return;
+    setCameraTrying(true);
+    try {
+      await retryCameraRef.current?.();
+    } finally {
+      setCameraTrying(false);
+    }
+  };
 
   const nodes = useGraphStore(useShallow(selectNodeList));
   const edges = useGraphStore(useShallow(selectEdgeList));
@@ -124,10 +140,15 @@ export default function ARStage({ onExit }: Props) {
     };
 
     const setupHandTracking = async (): Promise<void> => {
+      // Reset error state on each attempt so the user sees fresh feedback.
+      setCameraError(null);
       try {
         const v = videoRef.current;
         const overlay = overlayRef.current;
-        if (!v || !overlay) return;
+        if (!v || !overlay) {
+          setCameraError("Internal error: video/overlay element missing");
+          return;
+        }
         stream = await startWebcam(v);
         overlay.width = v.videoWidth || 1280;
         overlay.height = v.videoHeight || 720;
@@ -135,9 +156,10 @@ export default function ARStage({ onExit }: Props) {
         overlayCtx = overlay.getContext("2d");
         handTrackingReady = true;
         setInputMode("camera");
+        setCameraError(null);
         setStatus("tracking — pinch (left) to rotate/zoom, pinch (right) on a node to mark");
       } catch (err) {
-        console.warn("[AR] camera unavailable, mouse-only mode:", err);
+        console.warn("[AR] camera unavailable:", err);
         // Best-effort cleanup of any partially-acquired resources
         if (stream) {
           stream.getTracks().forEach((t) => t.stop());
@@ -145,10 +167,17 @@ export default function ARStage({ onExit }: Props) {
         }
         const v = videoRef.current;
         if (v) v.srcObject = null;
+        handTrackingReady = false;
+        detector = null;
+        overlayCtx = null;
         setInputMode("mouse");
-        setStatus("mouse mode — drag to rotate, scroll to zoom, click a node to mark");
+        setCameraError(describeCameraError(err));
+        setStatus("waiting for camera — meanwhile drag/scroll/click works");
       }
     };
+
+    // Make setupHandTracking callable from outside the effect (Retry button).
+    retryCameraRef.current = setupHandTracking;
 
     // ── Mouse handlers (attached to the graph container after scene mounts) ──
     const onMouseDown = (e: MouseEvent) => {
@@ -380,6 +409,30 @@ export default function ARStage({ onExit }: Props) {
         <span>nodes {nodes.length}</span>
         <span>active {activatedNodeIds.size}</span>
       </div>
+      {inputMode === "mouse" ? (
+        <div className="ar-camera-banner" role="status">
+          {cameraError ? (
+            <p className="ar-camera-error">{cameraError}</p>
+          ) : (
+            <p className="ar-camera-hint">
+              Click below to enable hand-tracking with your camera. Two-hand
+              gestures: pinch left to rotate/zoom, pinch right on a node to mark.
+            </p>
+          )}
+          <button
+            type="button"
+            className="ar-camera-retry"
+            onClick={handleRetryCamera}
+            disabled={cameraTrying}
+          >
+            {cameraTrying
+              ? "Trying camera…"
+              : cameraError
+                ? "Retry Camera"
+                : "Enable Camera"}
+          </button>
+        </div>
+      ) : null}
       <button className="ar-exit" onClick={onExit}>Exit AR</button>
     </div>
   );
