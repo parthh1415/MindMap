@@ -1,10 +1,14 @@
 // useSessionBootstrap
 //
 // On first mount:
-//   - reads `?session=<id>` from the URL; if present, hydrates the graph store
-//     by GET /sessions/{id}/graph.
-//   - if absent, POSTs /sessions to create a fresh session and rewrites the
-//     URL so reloads stay sticky.
+//   - reads `?session=<id>` from the URL; if present, hydrates the graph
+//     store by GET /sessions/{id}/graph (so explicit/bookmarked session
+//     URLs still work for sharing).
+//   - if absent, POSTs /sessions to create a fresh session. The URL is
+//     NOT rewritten — refreshing localhost:5173/ always gives you a
+//     clean slate, matching the user expectation that a page reload
+//     resets state. Persistence happens server-side; users who want to
+//     come back to a session can copy the URL from the history surface.
 //
 // Hydration uses `setTimelineSnapshot(...)` followed by `goLive()` so the
 // store ends in live mode but with the historical nodes already rendered.
@@ -67,17 +71,25 @@ export function useSessionBootstrap(): void {
   const sessionId = useSessionStore((s) => s.currentSessionId);
   const setSession = useSessionStore((s) => s.setSession);
 
-  // 1. Resolve a session id (URL param → existing store value → POST new).
+  // 1. Resolve a session id. Refresh = clean slate by design: we ignore
+  //    any `?session=` left in the URL from a previous run and ALWAYS
+  //    POST a fresh session. Sharing/bookmarking is a follow-up feature
+  //    (Share button) — not the default behavior.
   useEffect(() => {
     if (sessionId) return;
 
     let cancelled = false;
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get("session");
 
-    if (fromUrl) {
-      setSession(fromUrl);
-      return;
+    // Strip any stale `?session=` from the URL so the address bar matches
+    // the new clean session.
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("session")) {
+        url.searchParams.delete("session");
+        window.history.replaceState({}, "", url.toString());
+      }
+    } catch {
+      /* noop in non-browser tests */
     }
 
     void (async () => {
@@ -85,7 +97,7 @@ export function useSessionBootstrap(): void {
         const fresh = await createSession("Live");
         if (cancelled) return;
         setSession(fresh._id, fresh.name);
-        syncUrlSession(fresh._id);
+        // Intentionally NOT syncing the URL — refresh = clean slate.
       } catch (err) {
         console.warn("[sessionBootstrap] failed to create session", err);
         // Fall back to a local placeholder so the rest of the UI can still
@@ -118,7 +130,7 @@ export function useSessionBootstrap(): void {
             const fresh = await createSession("Live");
             if (cancelled) return;
             setSession(fresh._id, fresh.name);
-            syncUrlSession(fresh._id);
+            // No URL sync — see file header.
           } catch (err) {
             console.warn("[sessionBootstrap] 404 + create failed", err);
           }
