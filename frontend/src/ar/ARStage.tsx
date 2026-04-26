@@ -271,7 +271,9 @@ export default function ARStage({ onExit }: Props) {
   }, [nodes, edges]);
 
   // ── RafEffect: persistent render + gesture loop. Reads everything
-  // from refs so it never restarts. ──
+  // from refs so it never restarts. Mouse is the primary control;
+  // gestures are additive — both feed into the same target pose. If
+  // hand tracking is flaky, mouse keeps the view fully usable. ──
   useEffect(() => {
     let raf = 0;
     let cancelled = false;
@@ -282,6 +284,80 @@ export default function ARStage({ onExit }: Props) {
     const current = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
     let highlightedId: string | null = null;
     let debugFrameCounter = 0;
+
+    // ── Mouse handlers (always wired — primary control) ──
+    let mouseDown = false;
+    let mouseDragged = false;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+    let mouseDownX = 0;
+    let mouseDownY = 0;
+    const MOUSE_ROTATE = 0.005;
+    const MOUSE_ZOOM = 0.005;
+    const CLICK_DRAG_THRESHOLD = 4;
+
+    const onMouseDown = (e: MouseEvent) => {
+      mouseDown = true;
+      mouseDragged = false;
+      lastMouseX = mouseDownX = e.clientX;
+      lastMouseY = mouseDownY = e.clientY;
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!mouseDown) return;
+      const dx = e.clientX - lastMouseX;
+      const dy = e.clientY - lastMouseY;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      target.yaw += dx * MOUSE_ROTATE;
+      target.pitch += dy * MOUSE_ROTATE;
+      if (
+        Math.abs(e.clientX - mouseDownX) > CLICK_DRAG_THRESHOLD ||
+        Math.abs(e.clientY - mouseDownY) > CLICK_DRAG_THRESHOLD
+      ) {
+        mouseDragged = true;
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (!mouseDown) return;
+      mouseDown = false;
+      const scene = sceneRef.current;
+      if (mouseDragged || !scene) return;
+      const el = e.currentTarget as HTMLElement;
+      const rect = el.getBoundingClientRect();
+      const fx = e.clientX - rect.left;
+      const fy = e.clientY - rect.top;
+      let bestId: string | null = null;
+      let bestD = POINTER_PICK_RADIUS_PX;
+      scene.nodeMeshes.forEach((mesh, id) => {
+        const p = projectNodeToScreen(mesh, scene.camera, rect.width, rect.height);
+        const d = Math.hypot(p.x - fx, p.y - fy);
+        if (d < bestD) {
+          bestD = d;
+          bestId = id;
+        }
+      });
+      if (bestId) toggleActivatedRef.current(bestId);
+    };
+    const onMouseLeave = () => {
+      mouseDown = false;
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const dz = e.deltaY * MOUSE_ZOOM;
+      target.camZ = Math.min(
+        CAMERA_Z_MAX,
+        Math.max(CAMERA_Z_MIN, target.camZ + dz),
+      );
+    };
+
+    const gc = graphContainerRef.current;
+    if (gc) {
+      gc.addEventListener("mousedown", onMouseDown);
+      gc.addEventListener("mousemove", onMouseMove);
+      gc.addEventListener("mouseup", onMouseUp);
+      gc.addEventListener("mouseleave", onMouseLeave);
+      gc.addEventListener("wheel", onWheel, { passive: false });
+    }
 
     const loop = async () => {
       if (cancelled) return;
@@ -402,6 +478,14 @@ export default function ARStage({ onExit }: Props) {
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      const gcCleanup = graphContainerRef.current;
+      if (gcCleanup) {
+        gcCleanup.removeEventListener("mousedown", onMouseDown);
+        gcCleanup.removeEventListener("mousemove", onMouseMove);
+        gcCleanup.removeEventListener("mouseup", onMouseUp);
+        gcCleanup.removeEventListener("mouseleave", onMouseLeave);
+        gcCleanup.removeEventListener("wheel", onWheel);
+      }
     };
   }, []);
 
