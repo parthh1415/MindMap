@@ -19,10 +19,24 @@
 .ar-stage .ar-graph {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  /* Receive mouse events so drag-rotate / wheel-zoom / click-activate
+     work as a fallback when the camera is unavailable AND alongside
+     hand-tracking when it is. The HUD + Exit button live on a higher
+     z-index and accept pointer events themselves, so they still work. */
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.ar-stage .ar-graph:active {
+  cursor: grabbing;
+}
+
+.ar-stage[data-input-mode="camera"] .ar-graph {
+  cursor: default;
 }
 
 .ar-stage .ar-overlay {
+  /* Overlay is a hand-skeleton draw layer; never accepts mouse. */
   pointer-events: none;
 }
 
