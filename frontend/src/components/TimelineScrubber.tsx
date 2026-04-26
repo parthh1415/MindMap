@@ -116,34 +116,36 @@ export function TimelineScrubber() {
     : dayjs(range.end).format("HH:mm:ss");
 
   return (
-    <div className="scrubber-shell" role="region" aria-label="Timeline scrubber">
-      <div className="scrubber-times tabular">
-        <span>{dayjs(range.start).format("HH:mm:ss")}</span>
-        <button
-          type="button"
-          className={`live-pill ${timelineMode.active ? "live-pill--past" : "live-pill--live"}`}
-          onClick={() => timelineMode.active && goLive()}
-          aria-pressed={!timelineMode.active}
-        >
-          {!timelineMode.active ? (
-            <motion.span
-              aria-hidden
-              className="live-pill__dot"
-              animate={
-                reduceMotion
-                  ? undefined
-                  : { scale: [1, 1.4, 1], opacity: [1, 0.6, 1] }
-              }
-              transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-            />
-          ) : (
-            <Radio size={12} />
-          )}
-          <span className="tabular">{!timelineMode.active ? "LIVE" : "PAST"}</span>
-          <span className="live-pill__time tabular">{pillTimeLabel}</span>
-        </button>
-        <span>{dayjs(range.end).format("HH:mm:ss")}</span>
-      </div>
+    <div className="scrubber-shell glass-surface" role="region" aria-label="Timeline scrubber">
+      <button
+        type="button"
+        className={`live-pill ${timelineMode.active ? "live-pill--past" : "live-pill--live"}`}
+        onClick={() => timelineMode.active && goLive()}
+        aria-pressed={!timelineMode.active}
+        title={timelineMode.active ? "Return to live" : "Live (latest state)"}
+      >
+        {!timelineMode.active ? (
+          <motion.span
+            aria-hidden
+            className="live-pill__dot"
+            animate={
+              reduceMotion
+                ? undefined
+                : { scale: [1, 1.35, 1], opacity: [1, 0.55, 1] }
+            }
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+          />
+        ) : (
+          <Radio size={11} aria-hidden />
+        )}
+        <span className="live-pill__label">
+          {!timelineMode.active ? "LIVE" : "PAST"}
+        </span>
+      </button>
+
+      <span className="scrubber-time scrubber-time--start tabular" aria-hidden>
+        {dayjs(range.start).format("HH:mm:ss")}
+      </span>
 
       <div
         ref={(el) => {
@@ -158,29 +160,34 @@ export function TimelineScrubber() {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={trackBounds.width > 0 ? Math.round((playheadX / trackBounds.width) * 100) : 100}
+        aria-label="Scrub through session timeline"
       >
-        {/* Filled portion gradient */}
+        {/* Played portion */}
         <div
           className="scrubber-fill"
-          style={{
-            width: dragX !== null ? dragX : playheadX,
-          }}
+          style={{ width: dragX !== null ? dragX : playheadX }}
         />
-        {/* Tick marks for node-creation density */}
+        {/* Node-creation density dots */}
         {ticks.map((x, i) => (
           <div key={i} className="scrubber-tick" style={{ left: x }} />
         ))}
-        {/* Playhead */}
+        {/* Playhead — thin line with a grip dot above */}
         <motion.div
           className="scrubber-head"
           animate={{ x: dragX !== null ? dragX : playheadX }}
           transition={
             reduceMotion
               ? { duration: 0 }
-              : { type: "spring", stiffness: 360, damping: 30 }
+              : { type: "spring", stiffness: 380, damping: 32 }
           }
-        />
+        >
+          <span className="scrubber-head__grip" aria-hidden />
+        </motion.div>
       </div>
+
+      <span className="scrubber-time scrubber-time--end tabular" aria-hidden>
+        {pillTimeLabel}
+      </span>
 
       <div className="scrubber-actions">
         <BranchButton />
@@ -190,113 +197,174 @@ export function TimelineScrubber() {
         .scrubber-shell {
           position: absolute;
           left: 50%;
-          bottom: var(--space-5);
+          bottom: var(--sp-5);
           transform: translateX(-50%);
-          width: min(880px, calc(100vw - 64px));
+          width: min(820px, calc(100vw - 64px));
           z-index: var(--z-scrubber);
-          background: rgba(15, 23, 42, 0.7);
-          backdrop-filter: blur(12px);
-          border: 1px solid var(--border-subtle);
-          border-radius: var(--radius-lg);
-          padding: var(--space-3) var(--space-4);
-          box-shadow: var(--elev-3);
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-2);
-        }
-        .scrubber-times {
-          display: flex;
+          border-radius: var(--radius-pill);
+          padding: 10px 14px;
+          display: grid;
+          grid-template-columns: auto auto 1fr auto auto;
           align-items: center;
-          justify-content: space-between;
-          font-size: var(--font-size-xs);
-          color: var(--text-tertiary);
-          font-feature-settings: "tnum" 1;
+          gap: var(--sp-3);
+          /* Slightly stronger glass than the global helper so the chip
+           * reads as a primary control surface against the canvas. */
+          background: rgba(8, 12, 17, 0.72);
         }
+
         .live-pill {
           display: inline-flex;
           align-items: center;
-          gap: var(--space-2);
-          padding: var(--space-1) var(--space-3);
+          gap: 6px;
+          padding: 6px 11px;
           border-radius: var(--radius-pill);
           font-family: var(--font-display);
-          font-size: var(--font-size-xs);
-          letter-spacing: 0.12em;
+          font-size: var(--fs-xs);
+          letter-spacing: 0.18em;
           font-weight: 600;
+          line-height: 1;
+          transition: background-color var(--motion-quick) ease,
+                      box-shadow var(--motion-quick) ease,
+                      color var(--motion-quick) ease;
+          flex-shrink: 0;
         }
         .live-pill--live {
-          background: rgba(34, 211, 238, 0.12);
-          color: var(--signature-accent);
-          box-shadow: 0 0 0 1px var(--signature-accent-soft), 0 0 18px var(--signature-accent-glow);
+          background: var(--signature-accent);
+          color: var(--signature-accent-fg);
+          box-shadow:
+            0 0 0 1px rgba(214, 255, 58, 0.7),
+            0 0 22px rgba(214, 255, 58, 0.35);
+          cursor: default;
         }
         .live-pill--past {
           background: var(--bg-overlay);
           color: var(--text-secondary);
+          box-shadow: 0 0 0 1px var(--border-default);
+        }
+        .live-pill--past:hover {
+          color: var(--text-primary);
+          background: var(--bg-elevated);
+          box-shadow: 0 0 0 1px var(--border-strong);
         }
         .live-pill__dot {
           display: inline-block;
-          width: 8px;
-          height: 8px;
+          width: 6px;
+          height: 6px;
           border-radius: 999px;
-          background: var(--signature-accent);
-          box-shadow: 0 0 8px var(--signature-accent-glow);
+          background: var(--signature-accent-fg);
+          box-shadow: 0 0 6px rgba(0, 0, 0, 0.35) inset;
         }
-        .live-pill__time {
-          color: var(--text-secondary);
-          font-feature-settings: "tnum" 1;
+        .live-pill__label {
+          font-variant-numeric: tabular-nums;
         }
+
+        .scrubber-time {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+          color: var(--text-tertiary);
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .scrubber-time--end {
+          color: var(--signature-accent);
+          opacity: 0.78;
+        }
+
         .scrubber-track {
           position: relative;
-          height: 32px;
-          background:
-            /* film-strip hairlines every 4px for that oscilloscope/strip feel */
-            repeating-linear-gradient(
-              90deg,
-              rgba(255,255,255,0.05) 0px,
-              rgba(255,255,255,0.05) 1px,
-              transparent 1px,
-              transparent 4px
-            ),
-            linear-gradient(180deg,
-              color-mix(in srgb, var(--bg-base) 96%, var(--signature-accent)) 0%,
-              var(--bg-base) 100%);
-          border-radius: 6px;
+          height: 22px;
           cursor: ew-resize;
-          overflow: hidden;
-          border: 1px solid var(--border-subtle);
-          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+          touch-action: none;
+          /* The visible bar is centered inside a taller hit area so the
+           * track is easier to grab without crowding the chip. */
+          display: flex;
+          align-items: center;
+        }
+        .scrubber-track::before {
+          /* The bar itself */
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          height: 4px;
+          border-radius: var(--radius-pill);
+          background: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.04) 0%,
+            rgba(255, 255, 255, 0.10) 50%,
+            rgba(255, 255, 255, 0.04) 100%
+          );
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
         }
         .scrubber-fill {
           position: absolute;
           left: 0;
-          top: 0;
-          bottom: 0;
-          background:
-            linear-gradient(90deg,
-              color-mix(in srgb, var(--signature-accent) 8%, transparent),
-              color-mix(in srgb, var(--signature-accent) 32%, transparent));
-          mix-blend-mode: screen;
+          height: 4px;
+          border-radius: var(--radius-pill);
+          background: linear-gradient(
+            90deg,
+            rgba(214, 255, 58, 0.0),
+            rgba(214, 255, 58, 0.55) 60%,
+            rgba(214, 255, 58, 0.85)
+          );
           pointer-events: none;
+          box-shadow: 0 0 14px rgba(214, 255, 58, 0.32);
+          transition: width 90ms linear;
         }
         .scrubber-tick {
           position: absolute;
-          top: 6px;
-          bottom: 6px;
-          width: 1px;
-          background: rgba(248, 250, 252, 0.18);
+          top: 50%;
+          width: 2px;
+          height: 2px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.45);
+          transform: translate(-50%, -50%);
           pointer-events: none;
+          mix-blend-mode: screen;
         }
         .scrubber-head {
           position: absolute;
-          top: -4px;
-          bottom: -4px;
+          top: 0;
+          bottom: 0;
           width: 2px;
           background: var(--signature-accent);
-          box-shadow: 0 0 12px var(--signature-accent-glow);
+          box-shadow: 0 0 10px var(--signature-accent-glow);
           pointer-events: none;
+          margin-left: -1px; /* center the 2px line on the position */
+          transform-origin: 50% 50%;
         }
+        .scrubber-head__grip {
+          position: absolute;
+          top: -3px;
+          left: 50%;
+          width: 9px;
+          height: 9px;
+          border-radius: 999px;
+          background: var(--signature-accent);
+          transform: translateX(-50%);
+          box-shadow:
+            0 0 0 2px rgba(6, 9, 13, 0.85),
+            0 0 12px var(--signature-accent-glow);
+        }
+
         .scrubber-actions {
           display: flex;
-          justify-content: flex-end;
+          align-items: center;
+          flex-shrink: 0;
+        }
+
+        @media (max-width: 640px) {
+          .scrubber-shell {
+            width: calc(100vw - 32px);
+            grid-template-columns: auto 1fr auto auto;
+            gap: var(--sp-2);
+            padding: 8px 12px;
+          }
+          .scrubber-time--start {
+            display: none;
+          }
         }
       `}</style>
     </div>

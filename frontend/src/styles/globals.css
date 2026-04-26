@@ -151,17 +151,20 @@ a {
   background: var(--bg-base);
 }
 
-/* Subtle ambient gradient drift, signature-accent tinted */
+/* Subtle ambient gradient drift, signature-accent tinted.
+ * Tuned slightly stronger + a fourth volt-yellow well at the top so the
+ * canvas reads more "stage-lit" than "flat dark grey". */
 .ambient-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(ellipse 60% 50% at 18% 28%, rgba(214, 255, 58, 0.05), transparent 60%),
-    radial-gradient(ellipse 55% 45% at 82% 72%, rgba(77, 198, 232, 0.04), transparent 60%),
-    radial-gradient(ellipse 45% 50% at 50% 95%, rgba(181, 140, 255, 0.04), transparent 60%);
-  filter: blur(40px);
-  animation: ambient-drift 32s ease-in-out infinite alternate;
+    radial-gradient(ellipse 70% 55% at 18% 22%, rgba(214, 255, 58, 0.07), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 82% 78%, rgba(77, 198, 232, 0.05), transparent 60%),
+    radial-gradient(ellipse 50% 50% at 50% 100%, rgba(181, 140, 255, 0.045), transparent 60%),
+    radial-gradient(ellipse 90% 35% at 50% 0%,  rgba(214, 255, 58, 0.035), transparent 70%);
+  filter: blur(48px);
+  animation: ambient-drift 36s ease-in-out infinite alternate;
   pointer-events: none;
 }
 
@@ -171,15 +174,35 @@ a {
   100% { transform: translate3d(-1.5%, 1%, 0) scale(1); }
 }
 
-/* Dot grid for the canvas */
+/* Vignette: darken the edges of the canvas so floating chrome
+ * (TopBar, Scrubber, SidePanel) feels lifted off the surface. Subtle
+ * — no measurable contrast hit on 4.5:1 text checks because text is
+ * inside its own glass-surface chip. */
+.canvas-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 95% 80% at 50% 50%,
+    transparent 35%,
+    rgba(0, 0, 0, 0.35) 88%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}
+
+/* Dot grid for the canvas — softer + slightly larger pitch so the
+ * grid reads as ambient texture, not distraction. */
 .dot-grid {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
   background-position: 0 0;
   pointer-events: none;
   z-index: 1;
+  mask-image: radial-gradient(ellipse 100% 80% at 50% 50%, black 30%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse 100% 80% at 50% 50%, black 30%, transparent 90%);
 }
 
 /* ─────────── Reactflow overrides ─────────── */
