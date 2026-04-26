@@ -150,21 +150,23 @@ import {
   SupportedModels,
   type HandDetector,
 } from "@tensorflow-models/hand-pose-detection";
-import { setWasmPaths } from "@tensorflow/tfjs-backend-wasm";
+import "@tensorflow/tfjs-backend-webgl";
 import * as tf from "@tensorflow/tfjs-core";
 
 let detector: HandDetector | null = null;
 
 export async function initDetector(): Promise<HandDetector> {
   if (detector) return detector;
-  setWasmPaths(`${window.location.origin}/node_modules/@tensorflow/tfjs-backend-wasm/dist/`);
-  await tf.setBackend("wasm");
+  // tfjs runtime: pure WebGL, no MediaPipe IIFE, no solutionPath needed.
+  // Same MediaPipe-trained landmark model under the hood, just orchestrated
+  // by tfjs instead of MediaPipe's wasm. ~30-60fps on desktop is fine for
+  // post-session graph review.
+  await tf.setBackend("webgl");
   await tf.ready();
   detector = await createDetector(SupportedModels.MediaPipeHands, {
-    runtime: "mediapipe",
+    runtime: "tfjs",
     modelType: "full",
     maxHands: 2,
-    solutionPath: `${window.location.origin}/mediapipe/hands`,
   });
   return detector;
 }
