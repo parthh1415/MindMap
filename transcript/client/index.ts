@@ -8,7 +8,16 @@ export {
   type CreateTranscriptPipelineOptions,
   type TranscriptPipelineHandle,
   type FallbackReason,
+  type ProviderName,
 } from "./transcriptClient";
+
+export {
+  createAssemblyAIClient,
+  type AssemblyAIClient,
+  type AssemblyAIClientOptions,
+  type AssemblyAIError,
+  type AssemblyAIState,
+} from "./assemblyAIClient";
 
 export {
   createMicCapture,

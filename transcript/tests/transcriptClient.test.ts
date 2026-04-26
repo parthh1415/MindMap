@@ -92,6 +92,19 @@ class MockWebSocket {
 beforeEach(() => {
   MockWebSocket.instances = [];
   vi.stubGlobal("WebSocket", MockWebSocket);
+  // The pipeline now tries AssemblyAI FIRST, which kicks off a
+  // /internal/assembly-token GET. Stub fetch to return 503 (server
+  // not configured) so AssemblyAI fails fast and the chain falls
+  // through to ElevenLabs — which is what these tests exercise.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response('{"detail":"ASSEMBLYAI_API_KEY not configured"}', {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+  );
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -115,9 +128,12 @@ describe("transcriptClient fallback triggers", () => {
     });
 
     const startP = pipeline.start();
-    // Drive the mock socket to open so connect() resolves.
-    // The first tick after start() creates the WS.
-    await new Promise((r) => setTimeout(r, 0));
+    // The pipeline first tries AssemblyAI (stubbed fetch → 503), then
+    // falls through to ElevenLabs which creates the WebSocket. Wait a
+    // few ticks for that chain to settle.
+    for (let i = 0; i < 10 && MockWebSocket.instances.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     await startP;
