@@ -49,7 +49,7 @@ export const Hands = new Proxy(function () {} as unknown as new (
   },
   apply(_target, _thisArg, args) {
     const Real = readGlobal<(...a: unknown[]) => unknown>("Hands");
-    return Real.apply(undefined, args);
+    return Real(...args);
   },
 });
 

@@ -53,6 +53,40 @@ export function makeTrackId(): string {
  * one frame stay alive but increment framesSinceSeen — caller drops
  * them when framesSinceSeen > ROLE_LOCK_HOLD_FRAMES.
  */
+/**
+ * A landmark inside the EDGE_MARGIN strip near the image border is
+ * unreliable — MediaPipe's confidence drops, fingertip positions
+ * snap to the frame edge, and pinch detection becomes noisy. We drop
+ * hands whose centroid OR any fingertip lies within this margin.
+ *
+ * 4% of frame width/height ≈ 50 px on a 1280-wide feed — small
+ * enough that the user has a usable workspace, large enough to filter
+ * the hand-fully-out-of-frame edge cases that produced flaky pinches.
+ */
+const EDGE_MARGIN = 0.04;
+
+function isHandFullyInFrame(
+  hand: RawHand,
+  imageWidth: number,
+  imageHeight: number,
+): boolean {
+  const wMin = imageWidth * EDGE_MARGIN;
+  const wMax = imageWidth * (1 - EDGE_MARGIN);
+  const hMin = imageHeight * EDGE_MARGIN;
+  const hMax = imageHeight * (1 - EDGE_MARGIN);
+  // Wrist (0), thumb tip (4), index tip (8), middle MCP (9). If any
+  // of these are off-frame, the hand is too partial to read pinch
+  // reliably — better to drop it than emit a noisy track.
+  const checks = [0, 4, 8, 9];
+  for (const i of checks) {
+    const p = hand.keypoints[i];
+    if (!p) return false;
+    if (p.x < wMin || p.x > wMax) return false;
+    if (p.y < hMin || p.y > hMax) return false;
+  }
+  return true;
+}
+
 export function matchTracks(
   prev: TrackedHand[],
   raw: RawHand[],
@@ -63,8 +97,13 @@ export function matchTracks(
   const usedPrev = new Set<number>();
   const result: TrackedHand[] = [];
 
+  // Drop hands at the frame edges — see isHandFullyInFrame note.
+  const inFrame = raw.filter((h) =>
+    isHandFullyInFrame(h, imageWidth, imageHeight),
+  );
+
   // Top-2 by palm span (drop noise hands)
-  const candidates = raw
+  const candidates = inFrame
     .map((h) => ({ h, span: computePalmSpan(h.keypoints) }))
     .sort((a, b) => b.span - a.span)
     .slice(0, 2);

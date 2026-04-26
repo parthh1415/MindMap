@@ -20,25 +20,33 @@ import { toast } from "sonner";
  */
 export function NodeEditModal() {
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId);
-  const node = useGraphStore((s) => (selectedNodeId ? s.nodes[selectedNodeId] : null));
+  if (!selectedNodeId) return null;
+  // key={selectedNodeId} forces a fresh mount whenever the user opens
+  // a different node — that resets local state (label/info) naturally
+  // via React's mount lifecycle instead of the setState-in-effect
+  // anti-pattern. No effect needed to "sync prop into state".
+  return <NodeEditModalInner key={selectedNodeId} nodeId={selectedNodeId} />;
+}
+
+function NodeEditModalInner({ nodeId }: { nodeId: string }) {
+  const node = useGraphStore((s) => s.nodes[nodeId] ?? null);
   const selectNode = useGraphStore((s) => s.selectNode);
   const reduceMotion = useReducedMotion();
 
-  const [label, setLabel] = useState("");
+  // Initial state is derived directly from the node prop. Because this
+  // component is mounted fresh per nodeId (see key prop above), the
+  // useState initializer runs once with the correct values and stays
+  // sticky if the user types.
+  const [label, setLabel] = useState(() => node?.label ?? "");
   const [info, setInfo] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
 
+  // Autofocus on mount only.
   useEffect(() => {
-    if (node) {
-      setLabel(node.label);
-      setInfo("");
-      // autofocus the rename input on open
-      requestAnimationFrame(() => renameRef.current?.focus());
-    }
-  }, [node?._id]); // eslint-disable-line react-hooks/exhaustive-deps
+    requestAnimationFrame(() => renameRef.current?.focus());
+  }, []);
 
   useEffect(() => {
-    if (!selectedNodeId) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -47,7 +55,7 @@ export function NodeEditModal() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedNodeId, selectNode]);
+  }, [selectNode]);
 
   const close = () => selectNode(null);
 

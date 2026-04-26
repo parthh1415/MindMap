@@ -30,7 +30,13 @@ logger = logging.getLogger("agents.llm")
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_MODEL = "gemini-2.5-flash"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-nano")
+# Default to gpt-4.1-mini for topology — it makes hierarchical
+# judgment calls (root vs branch vs leaf, what counts as a
+# 'consequential' thought) that nano was getting wrong often enough
+# to produce noisy graphs. Still cheap; latency penalty vs nano is
+# small for the 100-word transcript chunks the topology agent
+# processes. Override via OPENAI_MODEL env if you want nano back.
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 MAX_ADDITION_NODES = 5
 MAX_RETRIES_429 = 2
