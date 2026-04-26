@@ -272,7 +272,7 @@ def test_branch_diff_endpoint(client, db):
             await nodes_repo.create_node(db, {"session_id": s2, "label": label})
         return s1, s2
 
-    s1, s2 = _asyncio.get_event_loop().run_until_complete(_setup())
+    s1, s2 = _asyncio.run(_setup())
 
     r = client.get(f"/sessions/{s1}/diff/{s2}")
     assert r.status_code == 200

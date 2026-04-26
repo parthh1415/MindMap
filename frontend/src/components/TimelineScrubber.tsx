@@ -30,10 +30,15 @@ export function TimelineScrubber() {
   const [dragX, setDragX] = useState<number | null>(null);
 
   // Compute time range from node timestamps.
+  // The timeline edge is intentionally a fresh wall-clock on every render
+  // so the "now" tick stays current while the panel is visible. This is
+  // observably correct (a few ms of skew is invisible), and we keep the
+  // useMemo below pure by capturing the timestamp once at render.
+  // eslint-disable-next-line react-hooks/purity
+  const renderTime = Date.now();
   const range = useMemo(() => {
     if (nodes.length === 0) {
-      const now = Date.now();
-      return { start: now - 60_000, end: now };
+      return { start: renderTime - 60_000, end: renderTime };
     }
     let min = Infinity;
     let max = -Infinity;
@@ -42,9 +47,11 @@ export function TimelineScrubber() {
       if (t < min) min = t;
       if (t > max) max = t;
     }
-    const now = Date.now();
-    return { start: Math.min(min, now - 30_000), end: Math.max(max, now) };
-  }, [nodes]);
+    return {
+      start: Math.min(min, renderTime - 30_000),
+      end: Math.max(max, renderTime),
+    };
+  }, [nodes, renderTime]);
 
   const ticks = useMemo(() => {
     if (trackBounds.width <= 0) return [];

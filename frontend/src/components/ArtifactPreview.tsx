@@ -74,6 +74,12 @@ export function ArtifactPreview() {
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, dismiss]);
 
+  const tab = tabs[activeTab] ?? tabs[0];
+  const html = useMemo(
+    () => (tab ? renderMarkdown(tab.content) : ""),
+    [tab],
+  );
+
   if (!artifact) return null;
 
   const onDownload = async () => {
@@ -107,12 +113,6 @@ export function ArtifactPreview() {
       "noopener",
     );
   };
-
-  const tab = tabs[activeTab] ?? tabs[0];
-  const html = useMemo(
-    () => (tab ? renderMarkdown(tab.content) : ""),
-    [tab],
-  );
 
   return (
     <AnimatePresence>

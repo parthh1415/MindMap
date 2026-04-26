@@ -53,14 +53,14 @@ export class GraphSocketClient {
     };
 
     this.ws.onmessage = (ev) => {
-      let parsed: GraphEvent | null = null;
+      let parsed: GraphEvent;
       try {
         parsed = JSON.parse(ev.data) as GraphEvent;
       } catch (err) {
         console.warn("[graph-ws] non-JSON message", err);
         return;
       }
-      if (!parsed || typeof parsed.type !== "string") return;
+      if (typeof parsed.type !== "string") return;
       useGraphStore.getState().applyGraphEvent(parsed);
     };
 
