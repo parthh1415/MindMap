@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useGraphStore } from "@/state/graphStore";
+import { useGraphStore, selectNodeList, selectEdgeList } from "@/state/graphStore";
+import { useShallow } from "zustand/react/shallow";
 import { startWebcam, stopWebcam } from "./cameraLifecycle";
 import {
   initDetector,
@@ -38,11 +39,32 @@ export default function ARStage({ onExit }: Props) {
   const [status, setStatus] = useState("starting…");
   const { fps, tick, latency } = useFps();
 
-  const nodes = useGraphStore((s) => Object.values(s.nodes));
-  const edges = useGraphStore((s) => Object.values(s.edges));
+  const nodes = useGraphStore(useShallow(selectNodeList));
+  const edges = useGraphStore(useShallow(selectEdgeList));
   const activatedNodeIds = useGraphStore((s) => s.activatedNodeIds);
   const toggleActivated = useGraphStore((s) => s.toggleActivated);
 
+  // Refs so the RAF loop always reads the latest values without restarting
+  const toggleActivatedRef = useRef(toggleActivated);
+  useEffect(() => {
+    toggleActivatedRef.current = toggleActivated;
+  }, [toggleActivated]);
+
+  const activatedRef = useRef(activatedNodeIds);
+  useEffect(() => {
+    activatedRef.current = activatedNodeIds;
+  }, [activatedNodeIds]);
+
+  // Ref so Effect 2 can find the live scene built by Effect 1
+  const sceneRef = useRef<SceneRefs | null>(null);
+
+  // Ref to keep tick stable — sync it without causing effect restarts
+  const tickRef = useRef(tick);
+  useEffect(() => {
+    tickRef.current = tick;
+  }, [tick]);
+
+  // Effect 1: Build scene + run RAF loop. Only restarts when graph topology changes.
   useEffect(() => {
     let raf = 0;
     let stream: MediaStream | null = null;
@@ -80,6 +102,7 @@ export default function ARStage({ onExit }: Props) {
           edges.map((e) => ({ source_id: e.source_id, target_id: e.target_id })),
           positions,
         );
+        sceneRef.current = scene;
 
         const detector = await initDetector();
         setStatus("tracking");
@@ -142,13 +165,13 @@ export default function ARStage({ onExit }: Props) {
               newHover = bestId;
             }
 
-            // Apply hover/active visual state
+            // Apply hover/active visual state on TRANSITION only
             if (newHover !== highlightedId) {
               if (highlightedId) {
                 const prev = scene.nodeMeshes.get(highlightedId);
                 if (prev) setNodeColor(
                   prev,
-                  activatedNodeIds.has(highlightedId) ? "active" : "base",
+                  activatedRef.current.has(highlightedId) ? "active" : "base",
                 );
               }
               if (newHover) {
@@ -158,20 +181,15 @@ export default function ARStage({ onExit }: Props) {
               highlightedId = newHover;
             }
 
-            // Pinch-edge → toggle activation
+            // Pinch-edge → toggle activation (uses ref for latest action)
             if (frame.pointerPinchEdge === "down" && highlightedId) {
-              toggleActivated(highlightedId);
+              toggleActivatedRef.current(highlightedId);
             }
-
-            // Re-color all activated nodes that aren't currently hovered
-            scene.nodeMeshes.forEach((mesh, id) => {
-              if (id === highlightedId) return;
-              setNodeColor(mesh, activatedNodeIds.has(id) ? "active" : "base");
-            });
+            // (No more bulk forEach repaint — Effect 2 handles activatedNodeIds changes.)
           }
 
           drawHands(ctx, tracks, overlay.width, overlay.height);
-          tick(performance.now() - t0);
+          tickRef.current(performance.now() - t0);
           raf = requestAnimationFrame(loop);
         };
         loop();
@@ -187,9 +205,19 @@ export default function ARStage({ onExit }: Props) {
       if (videoRef.current) stopWebcam(stream, videoRef.current);
       void disposeDetector();
       if (scene) disposeScene(scene);
+      sceneRef.current = null;
       clearTrackingState();
     };
-  }, [nodes, edges, activatedNodeIds, toggleActivated, tick]);
+  }, [nodes, edges]);
+
+  // Effect 2: Repaint node colors when activatedNodeIds changes — no scene rebuild.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    s.nodeMeshes.forEach((mesh, id) => {
+      setNodeColor(mesh, activatedNodeIds.has(id) ? "active" : "base");
+    });
+  }, [activatedNodeIds]);
 
   return (
     <div className="ar-stage">
