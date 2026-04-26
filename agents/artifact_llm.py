@@ -57,8 +57,17 @@ def _load_prompt(name: str) -> str:
 
 def _build_provider() -> "_llm.LLMProvider":
     # Phase 12: prefer OpenAI when its key is set; otherwise Groq.
+    # Phase 12.1: artifact templates produce long structured documents
+    # (1-4 KB markdown + evidence). gpt-4.1-nano was failing on these
+    # with ~110 KB of malformed JSON output; the live validator caught
+    # this. Use gpt-4.1-mini here instead — still cheap, much more
+    # reliable on long structured output. Cap response at 6 K tokens
+    # so a runaway generation can't wedge the request.
     if os.getenv("OPENAI_API_KEY"):
-        return _llm.OpenAIProvider()
+        return _llm.OpenAIProvider(
+            model=os.getenv("OPENAI_ARTIFACT_MODEL", "gpt-4.1-mini"),
+            max_tokens=6000,
+        )
     return _llm.GroqProvider()
 
 

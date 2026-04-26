@@ -112,26 +112,42 @@ class OpenAIProvider:
     protocol without touching any caller.
     """
 
-    def __init__(self, api_key: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY not set")
+        # Per-instance overrides so different uagents can use different
+        # models. Defaults to OPENAI_MODEL env (gpt-4.1-nano).
+        self.model = model or OPENAI_MODEL
+        # Hard cap on response length. Prevents the 'nano returns 110 KB
+        # of garbage and the JSON parser dies' failure mode the live
+        # validator caught on artifact generation.
+        self.max_tokens = max_tokens
         from openai import AsyncOpenAI
 
         self._client = AsyncOpenAI(api_key=self.api_key)
 
     async def stream_json(self, prompt: str, system: str) -> AsyncIterator[str]:
         """Yield content deltas as they arrive. JSON-mode."""
-        stream = await self._client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
-            stream=True,
-            temperature=0.2,
-        )
+            "response_format": {"type": "json_object"},
+            "stream": True,
+            "temperature": 0.2,
+        }
+        if self.max_tokens:
+            kwargs["max_tokens"] = self.max_tokens
+        stream = await self._client.chat.completions.create(**kwargs)
         async for chunk in stream:
             try:
                 delta = chunk.choices[0].delta
@@ -142,15 +158,18 @@ class OpenAIProvider:
                 continue
 
     async def generate_json(self, prompt: str, system: str) -> dict | list:
-        resp = await self._client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-        )
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+        }
+        if self.max_tokens:
+            kwargs["max_tokens"] = self.max_tokens
+        resp = await self._client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content or "{}"
         return json.loads(content)
 
