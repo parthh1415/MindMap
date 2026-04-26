@@ -33,9 +33,20 @@ const config: UserConfig & { test?: unknown } = {
     strictPort: false,
   },
   optimizeDeps: {
-    exclude: [
-      "@tensorflow/tfjs-backend-wasm",
+    // Force-include the AR deps so vite's esbuild converts them through
+    // its CJS interop layer. Serving them raw causes Safari (strictest
+    // ESM impl) to throw "Can't find variable: module" because the deep
+    // tfjs/converter dependency tree contains UMD-wrapped helpers.
+    include: [
       "@tensorflow-models/hand-pose-detection",
+      "@tensorflow/tfjs-core",
+      "@tensorflow/tfjs-converter",
+      "@tensorflow/tfjs-backend-webgl",
+    ],
+    exclude: [
+      // tfjs-backend-wasm ships its own .wasm assets and breaks if
+      // pre-bundled — must be served raw.
+      "@tensorflow/tfjs-backend-wasm",
     ],
   },
   test: {
