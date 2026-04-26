@@ -63,6 +63,14 @@ export interface AssemblyAIClientOptions {
   sampleRate?: number;
   /** Defaults to true — gives per-word + diarization metadata. */
   formatTurns?: boolean;
+  /** AssemblyAI v3 model. Default 'universal-streaming-english'.
+   *  Valid (per AssemblyAI as of 2025-05-12 schema):
+   *    - 'universal-streaming-english'      ← default, lowest latency
+   *    - 'universal-streaming-multilingual'
+   *    - 'whisper-rt'                       ← whisper, higher quality / latency
+   *  AssemblyAI rejects the connection (close 3006) when this param is
+   *  absent or invalid — discovered by direct probe. */
+  speechModel?: string;
 }
 
 export interface AssemblyAIClient {
@@ -187,6 +195,7 @@ export function createAssemblyAIClient(
   const endpoint = opts.endpointUrl ?? DEFAULT_ENDPOINT;
   const tokenUrl = opts.tokenUrl;
   const sessionId = opts.sessionId;
+  const speechModel = opts.speechModel ?? "universal-streaming-english";
 
   const internal: InternalState = {
     socket: null,
@@ -270,6 +279,7 @@ export function createAssemblyAIClient(
     const url = new URL(endpoint);
     url.searchParams.set("sample_rate", String(sampleRate));
     if (formatTurns) url.searchParams.set("format_turns", "true");
+    url.searchParams.set("speech_model", speechModel);
     url.searchParams.set("token", token);
 
     setState("connecting");
@@ -297,6 +307,27 @@ export function createAssemblyAIClient(
             message: `unparseable WS message: ${(e as Error).message}`,
             raw: ev.data,
           });
+          return;
+        }
+        // AssemblyAI sends `{type:"Error", error_code, error}` BEFORE
+        // closing the WS on protocol violations. Surface the actual
+        // message so we never get the silent "WS closed (3006) See
+        // Error message for details" experience again.
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          (parsed as Record<string, unknown>).type === "Error"
+        ) {
+          const e = parsed as Record<string, unknown>;
+          const code = Number(e.error_code ?? 0) || undefined;
+          const message = String(e.error ?? "AssemblyAI error");
+          // 3006 / 4xxx → auth/protocol-class; classify so the
+          // orchestrator can decide on fallback.
+          const lower = message.toLowerCase();
+          let kind: AssemblyAIError["kind"] = "protocol";
+          if (/token|unauth|forbidden|api[_ ]key/.test(lower)) kind = "auth";
+          else if (/credit|quota|limit|insufficient|payment/.test(lower)) kind = "credit";
+          emitError({ kind, message, code, raw: parsed });
           return;
         }
         const chunk = parseAssemblyMessage(parsed, sessionId);
