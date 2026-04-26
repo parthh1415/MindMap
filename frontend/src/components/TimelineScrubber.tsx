@@ -72,15 +72,19 @@ export function TimelineScrubber() {
     return trackBounds.width;
   }, [timelineMode, range, trackBounds.width]);
 
-  // Debounced snapshot fetch on drag.
+  // Debounced snapshot fetch on drag. Both the timer AND the in-flight
+  // request get cancelled on cleanup — without aborting the request,
+  // a slower-network earlier fetch can land AFTER a later one and
+  // overwrite the store with a stale snapshot.
   useEffect(() => {
     if (dragX === null || !sessionId || trackBounds.width <= 0) return;
     const span = Math.max(1, range.end - range.start);
     const ts = new Date(range.start + (dragX / trackBounds.width) * span).toISOString();
+    const ctrl = new AbortController();
     const id = window.setTimeout(async () => {
       try {
         const url = `${import.meta.env.VITE_BACKEND_URL ?? ""}/sessions/${sessionId}/graph?at=${encodeURIComponent(ts)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: ctrl.signal });
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data = (await res.json()) as {
           nodes: import("@shared/ws_messages").Node[];
@@ -88,10 +92,15 @@ export function TimelineScrubber() {
         };
         useGraphStore.getState().setTimelineSnapshot(data.nodes, data.edges, ts);
       } catch (err) {
+        // AbortError is expected on rapid drags — don't log.
+        if ((err as { name?: string }).name === "AbortError") return;
         console.warn("[scrubber] snapshot fetch failed", err);
       }
     }, 120);
-    return () => window.clearTimeout(id);
+    return () => {
+      window.clearTimeout(id);
+      ctrl.abort();
+    };
   }, [dragX, sessionId, range.end, range.start, trackBounds.width]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
