@@ -104,6 +104,10 @@ function classifyClose(code: number, reason: string): AssemblyAIError["kind"] {
     return "credit";
   }
   if (code === 1006 || code === 1011) return "network";
+  // 3xxx range = AssemblyAI v3 protocol errors (3006 missing param,
+  // 3007 input duration, ...). Surface as protocol so the orchestrator
+  // can decide whether to retry / fall through.
+  if (code >= 3000 && code < 4000) return "protocol";
   return "unknown";
 }
 
@@ -185,7 +189,18 @@ interface InternalState {
   chunkSubs: Set<ChunkCallback>;
   errorSubs: Set<ErrorCallback>;
   stateSubs: Set<StateCallback>;
+  /** Buffer of pending samples not yet flushed to AssemblyAI. micCapture
+   *  emits 20ms frames (320 samples), but AssemblyAI v3 requires frames
+   *  between 50 and 1000 ms. We coalesce until ≥ MIN_BATCH_SAMPLES then
+   *  flush. */
+  audioBuffer: Int16Array;
 }
+
+// 16 kHz × 16-bit mono = 32000 bytes/s.
+//   50 ms  =  800 samples (AssemblyAI's hard minimum)
+//  100 ms  = 1600 samples (chosen — comfortable margin, still low latency)
+// 1000 ms  = 16000 samples (AssemblyAI's hard maximum)
+const MIN_BATCH_SAMPLES_16K = 1600; // 100 ms at 16 kHz
 
 export function createAssemblyAIClient(
   opts: AssemblyAIClientOptions,
@@ -203,7 +218,17 @@ export function createAssemblyAIClient(
     chunkSubs: new Set(),
     errorSubs: new Set(),
     stateSubs: new Set(),
+    audioBuffer: new Int16Array(0),
   };
+
+  // Per-batch sample count for the configured sampleRate. 100ms target
+  // → 1600 samples at 16kHz. Comfortably above AssemblyAI's 50ms hard
+  // floor, well below the 1000ms ceiling, low enough latency that the
+  // user doesn't perceive the buffering.
+  const minBatchSamples = Math.max(
+    MIN_BATCH_SAMPLES_16K,
+    Math.ceil(sampleRate * 0.1),
+  );
 
   const setState = (s: AssemblyAIState) => {
     internal.state = s;
@@ -380,9 +405,26 @@ export function createAssemblyAIClient(
   const sendAudio = (pcm16: Int16Array): void => {
     const ws = internal.socket;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // AssemblyAI Universal-Streaming v3 expects raw PCM frames as the
-    // BINARY WS payload. No JSON envelope, no base64.
-    ws.send(pcm16.buffer.slice(pcm16.byteOffset, pcm16.byteOffset + pcm16.byteLength));
+
+    // Coalesce incoming 20ms frames into ≥100ms batches.
+    // AssemblyAI v3 closes the WS with code 3007 if any frame is
+    // shorter than 50ms or longer than 1000ms.
+    const prev = internal.audioBuffer;
+    const merged = new Int16Array(prev.length + pcm16.length);
+    merged.set(prev, 0);
+    merged.set(pcm16, prev.length);
+    internal.audioBuffer = merged;
+
+    // Flush as many 100ms batches as we have. Each ws.send is one
+    // discrete frame; sending the buffer in one shot is simpler and
+    // also valid (any size ≤ 1000ms is accepted).
+    if (internal.audioBuffer.length >= minBatchSamples) {
+      const toSend = internal.audioBuffer;
+      internal.audioBuffer = new Int16Array(0);
+      ws.send(
+        toSend.buffer.slice(toSend.byteOffset, toSend.byteOffset + toSend.byteLength),
+      );
+    }
   };
 
   const close = async (code = 1000, reason = "client closed"): Promise<void> => {
