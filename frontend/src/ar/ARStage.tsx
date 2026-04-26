@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useGraphStore, selectNodeList, selectEdgeList } from "@/state/graphStore";
 import { useShallow } from "zustand/react/shallow";
-import { startWebcam, stopWebcam, describeCameraError } from "./cameraLifecycle";
+import {
+  startWebcam,
+  stopWebcam,
+  describeCameraError,
+  listCameras,
+  getPreferredCameraId,
+  setPreferredCameraId,
+  pickCamera,
+  type CameraInfo,
+} from "./cameraLifecycle";
 import {
   initDetector,
   disposeDetector,
@@ -53,6 +62,8 @@ export default function ARStage({ onExit }: Props) {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraTrying, setCameraTrying] = useState(false);
+  const [cameras, setCameras] = useState<CameraInfo[]>([]);
+  const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
   const { fps, tick, latency } = useFps();
 
   const nodes = useGraphStore(useShallow(selectNodeList));
@@ -78,14 +89,27 @@ export default function ARStage({ onExit }: Props) {
     tickRef.current = tick;
   }, [tick]);
 
-  // Exposed by Effect 1; called from the fullscreen tap-target in JSX.
+  // Exposed by Effect 1; called from the fullscreen tap-target + the
+  // camera-picker dropdown in JSX.
   const retryCameraRef = useRef<(() => Promise<void>) | null>(null);
+  const switchCameraRef = useRef<((id: string) => Promise<void>) | null>(null);
 
   const handleTapToEnable = async () => {
     if (cameraTrying || cameraReady) return;
     setCameraTrying(true);
     try {
       await retryCameraRef.current?.();
+    } finally {
+      setCameraTrying(false);
+    }
+  };
+
+  const handlePickCamera = async (deviceId: string) => {
+    if (cameraTrying) return;
+    setPreferredCameraId(deviceId);
+    setCameraTrying(true);
+    try {
+      await switchCameraRef.current?.(deviceId);
     } finally {
       setCameraTrying(false);
     }
@@ -134,7 +158,9 @@ export default function ARStage({ onExit }: Props) {
       return true;
     };
 
-    const setupHandTracking = async (): Promise<void> => {
+    const setupHandTracking = async (
+      requestedDeviceId?: string | null,
+    ): Promise<void> => {
       setCameraError(null);
       try {
         const v = videoRef.current;
@@ -143,7 +169,41 @@ export default function ARStage({ onExit }: Props) {
           setCameraError("Internal error: video/overlay element missing");
           return;
         }
-        stream = await startWebcam(v);
+
+        // 1. Initial grant — request with explicit deviceId if known,
+        //    otherwise facingMode hint. macOS often picks Continuity
+        //    Camera (your iPhone) over the built-in webcam, which is
+        //    almost never what the user wants for AR.
+        const preferredId = requestedDeviceId ?? getPreferredCameraId();
+        stream = await startWebcam(v, preferredId);
+
+        // 2. Once permission is granted, labels become readable.
+        //    Enumerate, classify, and auto-switch if we landed on
+        //    Continuity but a built-in / external camera exists.
+        const list = await listCameras();
+        setCameras(list);
+
+        const currentTrack = stream.getVideoTracks()[0];
+        const currentDeviceId = currentTrack?.getSettings().deviceId ?? null;
+        const targetCam = pickCamera(list, preferredId ?? currentDeviceId);
+
+        if (
+          targetCam &&
+          currentDeviceId &&
+          targetCam.deviceId !== currentDeviceId
+        ) {
+          // We're on the wrong camera — restart with the right one.
+          stream.getTracks().forEach((t) => t.stop());
+          stream = await startWebcam(v, targetCam.deviceId);
+          setPreferredCameraId(targetCam.deviceId);
+          setActiveCameraId(targetCam.deviceId);
+        } else {
+          setActiveCameraId(currentDeviceId ?? targetCam?.deviceId ?? null);
+          // Persist whichever we settled on so next session is
+          // deterministic.
+          if (targetCam) setPreferredCameraId(targetCam.deviceId);
+        }
+
         overlay.width = v.videoWidth || 1280;
         overlay.height = v.videoHeight || 720;
         detector = await initDetector();
@@ -170,7 +230,22 @@ export default function ARStage({ onExit }: Props) {
         setStatus("camera blocked — tap anywhere to enable hand tracking");
       }
     };
-    retryCameraRef.current = setupHandTracking;
+    retryCameraRef.current = () => setupHandTracking();
+    switchCameraRef.current = async (deviceId: string) => {
+      // Tear down the current stream + detector first so the new
+      // device gets fresh state.
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        stream = null;
+      }
+      const v = videoRef.current;
+      if (v) v.srcObject = null;
+      handTrackingReady = false;
+      detector = null;
+      overlayCtx = null;
+      await disposeDetector();
+      await setupHandTracking(deviceId);
+    };
 
     (async () => {
       if (cancelled) return;
@@ -326,6 +401,21 @@ export default function ARStage({ onExit }: Props) {
         <span>{latency.toFixed(0)} ms</span>
         <span>nodes {nodes.length}</span>
         <span>active {activatedNodeIds.size}</span>
+        {cameras.length > 1 && cameraReady ? (
+          <select
+            className="ar-camera-picker"
+            value={activeCameraId ?? ""}
+            disabled={cameraTrying}
+            onChange={(e) => void handlePickCamera(e.target.value)}
+            aria-label="Switch camera"
+          >
+            {cameras.map((c) => (
+              <option key={c.deviceId} value={c.deviceId}>
+                {c.label} {c.kind === "continuity" ? "(iPhone)" : c.kind === "builtin" ? "(built-in)" : ""}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </div>
       {!cameraReady ? (
         <button

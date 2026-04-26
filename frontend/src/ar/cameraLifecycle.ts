@@ -30,12 +30,125 @@ export function describeCameraError(err: unknown): string {
   return "Camera failed to start — open the browser console for details.";
 }
 
-export async function startWebcam(video: HTMLVideoElement): Promise<MediaStream> {
+export interface CameraInfo {
+  deviceId: string;
+  label: string;
+  kind: "builtin" | "external" | "continuity" | "unknown";
+}
+
+const LS_PREFERRED_CAMERA = "mindmap-ar-camera-id";
+
+/**
+ * Classify a camera by label heuristics so we can default to the built-in
+ * webcam (FaceTime HD / "Built-in") and de-prioritize iPhone Continuity
+ * Camera (which macOS often selects by default and is rarely what the
+ * user wants for AR).
+ */
+function classifyCamera(label: string): CameraInfo["kind"] {
+  const l = label.toLowerCase();
+  if (l.includes("iphone") || l.includes("continuity")) return "continuity";
+  if (l.includes("facetime") || l.includes("built-in") || l.includes("integrated"))
+    return "builtin";
+  if (l.includes("usb") || l.includes("external") || l.includes("logitech"))
+    return "external";
+  return "unknown";
+}
+
+/**
+ * Sort cameras so the most-likely-correct one is first:
+ *   builtin > external > unknown > continuity
+ */
+function sortCameras(cams: CameraInfo[]): CameraInfo[] {
+  const rank: Record<CameraInfo["kind"], number> = {
+    builtin: 0,
+    external: 1,
+    unknown: 2,
+    continuity: 3,
+  };
+  return [...cams].sort((a, b) => rank[a.kind] - rank[b.kind]);
+}
+
+/**
+ * Enumerate available video-input devices. Labels are only populated
+ * AFTER the user has granted camera permission at least once — so call
+ * this only after a successful startWebcam.
+ */
+export async function listCameras(): Promise<CameraInfo[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cams = devices
+    .filter((d) => d.kind === "videoinput")
+    .map((d) => ({
+      deviceId: d.deviceId,
+      label: d.label || "Camera",
+      kind: classifyCamera(d.label),
+    }));
+  return sortCameras(cams);
+}
+
+export function getPreferredCameraId(): string | null {
+  try {
+    return localStorage.getItem(LS_PREFERRED_CAMERA);
+  } catch {
+    return null;
+  }
+}
+
+export function setPreferredCameraId(deviceId: string | null): void {
+  try {
+    if (deviceId) localStorage.setItem(LS_PREFERRED_CAMERA, deviceId);
+    else localStorage.removeItem(LS_PREFERRED_CAMERA);
+  } catch {
+    // ignore quota / private-mode errors
+  }
+}
+
+/**
+ * Pick the camera most likely to be the user's intent, given a list of
+ * available cameras and an optional saved preference.
+ *
+ * Priority:
+ *   1. Saved preference, if it still exists in the list.
+ *   2. First builtin / external (NOT Continuity).
+ *   3. First entry, whatever it is.
+ */
+export function pickCamera(
+  cams: CameraInfo[],
+  preferredId: string | null,
+): CameraInfo | null {
+  if (cams.length === 0) return null;
+  if (preferredId) {
+    const saved = cams.find((c) => c.deviceId === preferredId);
+    if (saved) return saved;
+  }
+  const sorted = sortCameras(cams);
+  const nonContinuity = sorted.find((c) => c.kind !== "continuity");
+  return nonContinuity ?? sorted[0]!;
+}
+
+export async function startWebcam(
+  video: HTMLVideoElement,
+  deviceId?: string | null,
+): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("getUserMedia not supported in this browser");
   }
+  // If we have a specific device, request it exactly. Otherwise hint
+  // facingMode and let the browser pick — we'll re-pick once labels
+  // are visible after the first grant.
+  const videoConstraints: MediaTrackConstraints = deviceId
+    ? {
+        deviceId: { exact: deviceId },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      }
+    : {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: "user",
+      };
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+    video: videoConstraints,
     audio: false,
   });
   video.srcObject = stream;
