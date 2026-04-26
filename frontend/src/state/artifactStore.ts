@@ -59,6 +59,9 @@ export type Artifact = {
   generated_at?: string;
   classify_top_choice?: ArtifactType;
   classify_confidence?: number;
+  /** True once the user has clicked Save on this artifact. Pinned
+   *  artifacts surface to the top of the history list. */
+  pinned?: boolean;
 };
 
 export type ArtifactHistoryItem = {
@@ -69,6 +72,7 @@ export type ArtifactHistoryItem = {
   generated_at: string;
   classify_top_choice?: ArtifactType;
   classify_confidence?: number;
+  pinned?: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -99,6 +103,10 @@ type ArtifactStore = {
   openHistory: () => Promise<void>;
   closeHistory: () => void;
   loadFromHistory: (artifactId: string) => Promise<void>;
+  /** Toggle the saved/pinned state of the active artifact. Optimistic:
+   *  flips local state immediately so the Save button feels instant,
+   *  rolls back on a backend error. */
+  toggleSaveActive: () => Promise<void>;
   setActiveArtifactMarkdown: (md: string) => void;
   enterEditor: () => void;
   exitEditor: () => void;
@@ -138,8 +146,18 @@ function normalizeArtifact(raw: unknown): Artifact | null {
   const o = raw as Record<string, unknown>;
   const session_id =
     typeof o.session_id === "string" ? o.session_id : "";
+  // Backend's `_serialize_artifact` renames `_id` → `artifact_id`, but
+  // tests + a few WS payloads still emit `_id`. Accept either so the
+  // Save button (which needs the id to PATCH /artifacts/:id/pin) works
+  // for both the live API and existing fixture data.
+  const id =
+    typeof o._id === "string"
+      ? o._id
+      : typeof o.artifact_id === "string"
+        ? o.artifact_id
+        : undefined;
   return {
-    _id: typeof o._id === "string" ? o._id : undefined,
+    _id: id,
     session_id,
     artifact_type: asArtifactType(o.artifact_type),
     title: typeof o.title === "string" ? o.title : "Untitled artifact",
@@ -184,6 +202,7 @@ function normalizeArtifact(raw: unknown): Artifact | null {
       typeof o.classify_confidence === "number"
         ? o.classify_confidence
         : undefined,
+    pinned: o.pinned === true,
   };
 }
 
@@ -396,9 +415,15 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
         ? (data.artifacts as unknown[])
             .map((a) => {
               const o = a as Record<string, unknown>;
-              if (typeof o._id !== "string") return null;
+              const id =
+                typeof o._id === "string"
+                  ? o._id
+                  : typeof o.artifact_id === "string"
+                    ? o.artifact_id
+                    : null;
+              if (!id) return null;
               return {
-                _id: o._id,
+                _id: id,
                 session_id:
                   typeof o.session_id === "string" ? o.session_id : "",
                 artifact_type: asArtifactType(o.artifact_type),
@@ -416,6 +441,7 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
                   typeof o.classify_confidence === "number"
                     ? o.classify_confidence
                     : undefined,
+                pinned: o.pinned === true,
               } as ArtifactHistoryItem;
             })
             .filter((x): x is ArtifactHistoryItem => x !== null)
@@ -443,6 +469,44 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
     } catch (err) {
       set({
         phase: "idle",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  toggleSaveActive: async () => {
+    const { apiBase, activeArtifact, history } = get();
+    if (!activeArtifact?._id) return;
+    const id = activeArtifact._id;
+    const nextPinned = !activeArtifact.pinned;
+    // Optimistic flip — UI confirms instantly, we reconcile on response.
+    set({
+      activeArtifact: { ...activeArtifact, pinned: nextPinned },
+      history: history.map((h) =>
+        h._id === id ? { ...h, pinned: nextPinned } : h,
+      ),
+    });
+    try {
+      const res = await fetch(
+        `${apiBase}/artifacts/${encodeURIComponent(id)}/pin`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pinned: nextPinned }),
+        },
+      );
+      if (!res.ok) throw new Error(`pin ${res.status}`);
+    } catch (err) {
+      // Roll back the optimistic update — keep the user's data
+      // honest about what's actually persisted server-side.
+      const cur = get();
+      set({
+        activeArtifact: cur.activeArtifact?._id === id
+          ? { ...cur.activeArtifact, pinned: !nextPinned }
+          : cur.activeArtifact,
+        history: cur.history.map((h) =>
+          h._id === id ? { ...h, pinned: !nextPinned } : h,
+        ),
         error: err instanceof Error ? err.message : String(err),
       });
     }

@@ -308,3 +308,47 @@ def test_internal_artifact_result_resolves_future(client):
 def test_get_artifact_404(client):
     r = client.get("/artifacts/does-not-exist")
     assert r.status_code == 404
+
+
+def test_pin_artifact_toggles_saved_flag(client, monkeypatch, db):
+    """End-to-end: generate an artifact, pin it, see the flag flip
+    in both the single-fetch and the per-session list responses."""
+    _make_node(db, session_id="s_pin", node_id="n1", label="Caching")
+    _patch_generate_callback(
+        client,
+        monkeypatch,
+        {
+            "title": "Caching brief",
+            "markdown": "# Caching\n\nuse redis",
+            "files": [],
+            "evidence": [],
+        },
+    )
+    g = client.post("/sessions/s_pin/generate-artifact", json={"artifact_type": "brief"})
+    assert g.status_code == 200, g.text
+    artifact_id = g.json()["artifact_id"]
+
+    # Default = unpinned.
+    initial = client.get(f"/artifacts/{artifact_id}").json()
+    assert initial["pinned"] is False
+
+    # Pin it.
+    p = client.patch(f"/artifacts/{artifact_id}/pin", json={"pinned": True})
+    assert p.status_code == 200
+    assert p.json()["pinned"] is True
+
+    # List + single-fetch both reflect the new flag.
+    listed = client.get("/sessions/s_pin/artifacts").json()["artifacts"]
+    assert listed[0]["pinned"] is True
+    fetched = client.get(f"/artifacts/{artifact_id}").json()
+    assert fetched["pinned"] is True
+
+    # Unpin restores default.
+    u = client.patch(f"/artifacts/{artifact_id}/pin", json={"pinned": False})
+    assert u.status_code == 200
+    assert u.json()["pinned"] is False
+
+
+def test_pin_unknown_artifact_404(client):
+    r = client.patch("/artifacts/missing/pin", json={"pinned": True})
+    assert r.status_code == 404

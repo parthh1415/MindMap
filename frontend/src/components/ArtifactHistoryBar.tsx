@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowUpRight } from "lucide-react";
-import { useEffect } from "react";
+import { ArrowUpRight, BookmarkCheck } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import {
   useArtifactStore,
   useArtifactHistory,
@@ -28,6 +28,15 @@ export function ArtifactHistoryBar() {
   const closeHistory = useArtifactStore((s) => s.closeHistory);
   const loadFromHistory = useArtifactStore((s) => s.loadFromHistory);
   const items = useArtifactHistory();
+
+  // Saved/pinned artifacts surface to the top so the user's kept work
+  // is immediately reachable. Within each bucket we preserve the
+  // backend's chronological order (newest first).
+  const sortedItems = useMemo(() => {
+    const pinned = items.filter((i) => i.pinned);
+    const rest = items.filter((i) => !i.pinned);
+    return [...pinned, ...rest];
+  }, [items]);
 
   useEffect(() => {
     if (!open) return;
@@ -82,14 +91,25 @@ export function ArtifactHistoryBar() {
               </p>
             ) : (
               <ul className="art-history__list">
-                {items.slice(0, 10).map((item) => (
+                {sortedItems.slice(0, 10).map((item) => (
                   <li key={item._id}>
                     <button
                       type="button"
-                      className="art-history__row"
+                      className={`art-history__row${
+                        item.pinned ? " is-pinned" : ""
+                      }`}
                       onClick={() => void loadFromHistory(item._id)}
                       data-testid={`history-row-${item._id}`}
                     >
+                      {item.pinned ? (
+                        <BookmarkCheck
+                          size={12}
+                          className="art-history__row-pin"
+                          aria-label="Saved"
+                        />
+                      ) : (
+                        <span className="art-history__row-pin-spacer" aria-hidden />
+                      )}
                       <span className="art-history__row-title">{item.title}</span>
                       <span className="art-history__row-type">
                         {ARTIFACT_LABELS[item.artifact_type]}
@@ -164,7 +184,7 @@ export function ArtifactHistoryBar() {
               }
               .art-history__row {
                 display: grid;
-                grid-template-columns: 1fr auto auto auto;
+                grid-template-columns: 14px 1fr auto auto auto;
                 align-items: center;
                 gap: var(--sp-2);
                 padding: 8px var(--sp-2);
@@ -176,6 +196,22 @@ export function ArtifactHistoryBar() {
                 font-family: inherit;
                 text-align: left;
                 width: 100%;
+              }
+              .art-history__row.is-pinned {
+                background: var(--signature-accent-soft);
+                border-color: rgba(214, 255, 58, 0.28);
+              }
+              .art-history__row.is-pinned:hover {
+                background: rgba(214, 255, 58, 0.16);
+                border-color: var(--signature-accent);
+              }
+              .art-history__row-pin {
+                color: var(--signature-accent);
+                flex-shrink: 0;
+              }
+              .art-history__row-pin-spacer {
+                width: 12px;
+                height: 12px;
               }
               .art-history__row:hover {
                 background: var(--bg-overlay);

@@ -136,6 +136,10 @@ def _serialize_artifact(doc: dict) -> dict:
     out["artifact_id"] = out.pop("_id")
     if isinstance(out.get("generated_at"), datetime):
         out["generated_at"] = out["generated_at"].isoformat()
+    if isinstance(out.get("pinned_at"), datetime):
+        out["pinned_at"] = out["pinned_at"].isoformat()
+    # Default to False so the frontend doesn't have to handle undefined.
+    out.setdefault("pinned", False)
     return out
 
 
@@ -250,6 +254,25 @@ async def get_artifact_route(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     doc = await artifacts_repo.get_artifact(db, artifact_id)
+    if doc is None:
+        raise HTTPException(404, "artifact not found")
+    return _serialize_artifact(doc)
+
+
+class PinArtifactBody(BaseModel):
+    pinned: bool
+
+
+@router.patch("/artifacts/{artifact_id}/pin")
+async def pin_artifact_route(
+    artifact_id: str,
+    body: PinArtifactBody,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Toggle the saved/pinned flag on an artifact. Pinned artifacts
+    are kept indefinitely and surface to the top of the session
+    history list."""
+    doc = await artifacts_repo.set_pinned(db, artifact_id, body.pinned)
     if doc is None:
         raise HTTPException(404, "artifact not found")
     return _serialize_artifact(doc)

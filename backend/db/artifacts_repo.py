@@ -91,8 +91,24 @@ async def get_artifact(
     return await db.artifacts.find_one({"_id": artifact_id})
 
 
+async def set_pinned(
+    db: AsyncIOMotorDatabase, artifact_id: str, pinned: bool
+) -> Optional[dict]:
+    """Mark an artifact saved/pinned. Pinned artifacts surface to the
+    top of the history list and are visually distinguished so users
+    can find their kept work fast."""
+    await _ensure_index(db)
+    res = await db.artifacts.find_one_and_update(
+        {"_id": artifact_id},
+        {"$set": {"pinned": bool(pinned), "pinned_at": _utcnow() if pinned else None}},
+        return_document=True,
+    )
+    return res
+
+
 __all__ = [
     "create_artifact",
     "list_for_session",
     "get_artifact",
+    "set_pinned",
 ]
