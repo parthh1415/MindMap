@@ -36,6 +36,28 @@ const EDGE_TYPES: EdgeTypes = {
 };
 
 /**
+ * Deterministic seed position from a node id. Used as the fallback
+ * when d3-force's async tick hasn't populated the positions Map yet.
+ *
+ * Without this, new nodes default to {x:0, y:0} → all stacked at
+ * the origin → looks like nodes 'disappear' until the sim ticks
+ * (which triggered the 'unfocus the window and they come back' bug:
+ *  the unfocus caused a re-render that picked up the now-populated
+ *  positions). Spreading via id-hash makes nodes immediately visible,
+ * and the sim converges them naturally on first tick.
+ */
+function seedPosition(id: string): { x: number; y: number } {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  // Map hash to a deterministic point on a wide ring around origin.
+  const angle = ((h >>> 0) % 360) * (Math.PI / 180);
+  const radius = 220 + ((h >>> 8) % 80); // 220..300 px out
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+}
+
+/**
  * The main canvas. Positions are produced by a live `d3-force` simulation
  * (see `useForceLayout`) so additions/removals nudge the graph instead of
  * teleporting nodes. Drag pins a node via fx/fy on the simulation, and
@@ -93,7 +115,7 @@ function GraphCanvasInner() {
   const rfNodes: RFNode<SolidNodeData | GhostNodeData>[] = useMemo(() => {
     const all: RFNode<SolidNodeData | GhostNodeData>[] = [];
     for (const n of nodes) {
-      const pos = positions.get(n._id) ?? { x: 0, y: 0 };
+      const pos = positions.get(n._id) ?? seedPosition(n._id);
       const speakerColor =
         (n.speaker_id && speakerColors[n.speaker_id]) || "var(--text-secondary)";
       const dimmed = !!neighborSet && !neighborSet.has(n._id);
@@ -112,7 +134,7 @@ function GraphCanvasInner() {
       });
     }
     for (const g of ghosts) {
-      const pos = positions.get(g.ghost_id) ?? { x: 0, y: 0 };
+      const pos = positions.get(g.ghost_id) ?? seedPosition(g.ghost_id);
       const speakerColor = speakerColors[g.speaker_id] || "var(--signature-accent)";
       all.push({
         id: g.ghost_id,

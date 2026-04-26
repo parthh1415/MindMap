@@ -13,6 +13,10 @@ interface SimLink { source: string; target: string; }
 export interface LayoutInput {
   _id: string;
   label: string;
+  /** 0..1 — bigger = more important = larger orb. Defaults to 0.5
+   *  if not provided. ROOT topics live at 0.9-1.0, BRANCH at 0.55-0.8,
+   *  LEAF at 0.25-0.5. */
+  importance?: number;
 }
 
 export interface LayoutEdge {
@@ -85,10 +89,19 @@ export interface SceneRefs {
   orbTexture: THREE.CanvasTexture;
 }
 
-// Visual feel — tuned to match the user's reference: tiny bright dots
-// with soft halos in a constellation/galaxy aesthetic.
-const ORB_SCALE = 0.14;          // sprite world-size (the halo)
-const PICK_RADIUS = 0.04;         // invisible pick mesh radius for hand pointer
+// Visual feel — orbs scale by importance. ROOT topics (importance ~1.0)
+// render as fat luminous spheres with the topic name inside; LEAF
+// nodes (importance ~0.3) render as small dots with tight labels.
+//
+// Linear interpolation between MIN and MAX based on importance.
+const ORB_SCALE_MIN = 0.18;       // leaves (importance 0.0)
+const ORB_SCALE_MAX = 0.55;       // roots (importance 1.0)
+const PICK_RADIUS_MIN = 0.05;     // invisible pick mesh — used for getWorldPosition only
+
+function orbScaleFor(importance: number): number {
+  const t = Math.max(0, Math.min(1, importance));
+  return ORB_SCALE_MIN + (ORB_SCALE_MAX - ORB_SCALE_MIN) * t;
+}
 const COLOR_NODE_BASE = 0x6ec1ff;      // cyan-white star
 const COLOR_NODE_HOVER = 0xffae3d;     // warm amber
 const COLOR_NODE_ACTIVE = 0xd6ff3a;    // volt yellow (brand)
@@ -140,26 +153,61 @@ function makeOrbTexture(): THREE.CanvasTexture {
 }
 
 /**
- * Render a small white label sprite to float beside the orb.
- * Smaller than before (0.4 wide) — these are subtle annotations, not
- * the dominant visual.
+ * Render the topic name INSIDE the orb sprite. Auto-wraps at the canvas
+ * width and shrinks the font as needed so root topics ("Cybersecurity")
+ * read clearly while small leaves (a 10-word decision) still fit.
+ *
+ * The returned sprite is meant to be stacked on the same world position
+ * as the orb halo; importance-driven scaling is applied by the caller.
  */
-function makeLabelSprite(label: string): THREE.Sprite {
+function makeLabelSprite(rawLabel: string): THREE.Sprite {
+  // Canvas is square so text can wrap to multiple lines and stay
+  // centered in the orb halo.
   const canvas = document.createElement("canvas");
   canvas.width = 512;
-  canvas.height = 96;
+  canvas.height = 512;
   const ctx = canvas.getContext("2d")!;
-  ctx.font = "500 44px 'Space Grotesk', system-ui, sans-serif";
-  ctx.textAlign = "left";
+
+  // Strip any [TAG] prefix the topology agent may have added — it's
+  // useful metadata for doc generation but visually busy on the orb.
+  const label = rawLabel.replace(/^\[[A-Z]+\]\s*/, "");
+
+  // Auto-fit: try a sequence of font sizes from large→small until
+  // the wrapped text fits inside the canvas.
+  const fontStack = "'Space Grotesk', system-ui, sans-serif";
+  const sizes = [62, 54, 48, 42, 36, 30, 26, 22];
+  const padding = 36;        // canvas padding around text block
+  const lineHeightMul = 1.15;
+  const maxBoxW = canvas.width - padding * 2;
+  const maxBoxH = canvas.height - padding * 2;
+
+  let chosenSize = sizes[sizes.length - 1]!;
+  let chosenLines: string[] = [label];
+  for (const size of sizes) {
+    ctx.font = `600 ${size}px ${fontStack}`;
+    const lines = wrapText(ctx, label, maxBoxW);
+    const blockH = lines.length * size * lineHeightMul;
+    if (blockH <= maxBoxH) {
+      chosenSize = size;
+      chosenLines = lines;
+      break;
+    }
+  }
+
+  ctx.font = `600 ${chosenSize}px ${fontStack}`;
+  ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  // Strong drop-shadow so labels read on any backdrop.
-  ctx.shadowColor = "rgba(0, 0, 0, 0.95)";
-  ctx.shadowBlur = 12;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+  ctx.shadowBlur = 10;
   ctx.fillStyle = "#ffffff";
-  const maxChars = 24;
-  const text =
-    label.length > maxChars ? label.slice(0, maxChars - 1) + "…" : label;
-  ctx.fillText(text, 16, canvas.height / 2);
+
+  const blockH = chosenLines.length * chosenSize * lineHeightMul;
+  const cx = canvas.width / 2;
+  const startY = canvas.height / 2 - blockH / 2 + (chosenSize * lineHeightMul) / 2;
+  for (let i = 0; i < chosenLines.length; i++) {
+    ctx.fillText(chosenLines[i]!, cx, startY + i * chosenSize * lineHeightMul);
+  }
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
@@ -167,13 +215,38 @@ function makeLabelSprite(label: string): THREE.Sprite {
     map: tex,
     transparent: true,
     depthWrite: false,
-    depthTest: false, // labels always on top
+    depthTest: false, // labels always on top of orbs/lines
   });
   const sprite = new THREE.Sprite(mat);
-  // Aspect ratio matches canvas (~5.3 wide). Width 0.55 gives readable
-  // text at default zoom without crowding the field.
-  sprite.scale.set(0.55, 0.103, 1);
+  // Square sprite — caller scales it to match the orb halo size so
+  // text appears INSIDE the orb's footprint.
+  sprite.scale.set(1, 1, 1);
   return sprite;
+}
+
+/**
+ * Greedy word-wrap to fit a line within maxWidth at the ctx's current
+ * font setting. Returns one array of lines.
+ */
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? current + " " + word : word;
+    if (ctx.measureText(next).width <= maxWidth) {
+      current = next;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length === 0 ? [""] : lines;
 }
 
 export function buildScene(
@@ -215,8 +288,9 @@ export function buildScene(
   // Shared white-gradient texture for all orb halos.
   const orbTexture = makeOrbTexture();
   // Invisible pick-proxy geometry shared across all nodes — used only
-  // by projectNodeToScreen for fingertip-pick distance math.
-  const pickGeom = new THREE.SphereGeometry(PICK_RADIUS, 8, 8);
+  // by projectNodeToScreen for fingertip-pick distance math. The
+  // actual radius doesn't matter since pick distance is screen-space.
+  const pickGeom = new THREE.SphereGeometry(PICK_RADIUS_MIN, 8, 8);
   const pickMat = new THREE.MeshBasicMaterial({ visible: false });
 
   const nodeMeshes = new Map<string, THREE.Mesh>();
@@ -226,6 +300,11 @@ export function buildScene(
   for (const n of nodes) {
     const p = positions[n._id];
     if (!p) continue;
+
+    // Importance drives orb size — root topics are bigger, leaves
+    // smaller. Defaults to 0.5 (mid-tier branch) if not provided.
+    const importance = n.importance ?? 0.5;
+    const orbScale = orbScaleFor(importance);
 
     // Determine starting position. If we knew this orb in a previous
     // rebuild, START WHERE IT WAS (no jarring jump). Otherwise (new
@@ -246,6 +325,8 @@ export function buildScene(
     };
 
     // Glow orb: tinted billboard with additive blend → soft halo.
+    // Per-orb baseScale stored on userData so hover/active state can
+    // pop the orb back to a known-good size.
     const orbMat = new THREE.SpriteMaterial({
       map: orbTexture,
       color: COLOR_NODE_BASE,
@@ -255,9 +336,11 @@ export function buildScene(
     });
     const orb = new THREE.Sprite(orbMat);
     orb.position.copy(startPos);
-    orb.scale.set(ORB_SCALE, ORB_SCALE, 1);
+    orb.scale.set(orbScale, orbScale, 1);
     orb.userData.nodeId = n._id;
     orb.userData.anim = animState;
+    orb.userData.baseScale = orbScale;
+    orb.renderOrder = 0;
     graphRoot.add(orb);
     orbSprites.set(n._id, orb);
 
@@ -268,11 +351,18 @@ export function buildScene(
     graphRoot.add(pickMesh);
     nodeMeshes.set(n._id, pickMesh);
 
-    // Topic label — also moves with the orb. Offset is reapplied
-    // each animation frame inside updateAnimations().
+    // Topic label — STACKED ON the orb (centered), sized to fit
+    // INSIDE the orb's halo. Caller updates position in lockstep
+    // with the orb during bloom animation.
     const label = makeLabelSprite(n.label);
-    label.position.set(startPos.x + 0.18, startPos.y + 0.12, startPos.z);
+    label.position.copy(startPos);
+    // Label sprite is square (1×1 normalized); scale to ~75% of the
+    // orb's halo so text reads INSIDE the orb's bright zone.
+    const labelScale = orbScale * 0.85;
+    label.scale.set(labelScale, labelScale, 1);
     label.userData.nodeId = n._id;
+    label.userData.baseScale = labelScale;
+    label.renderOrder = 2; // above edge lines (1)
     graphRoot.add(label);
     labelSprites.set(n._id, label);
   }
@@ -339,14 +429,19 @@ export function setNodeColor(
   pickMesh: THREE.Mesh, state: "base" | "hover" | "active",
 ): void {
   const id = pickMesh.userData.nodeId as string | undefined;
-  // pickMesh.parent is the graphRoot — find the matching sprite by id.
-  // (We can't reach orbSprites directly from here; ARStage threads it
-  // via setNodeColor's caller. Trade-off: we look it up via parent.)
   const root = pickMesh.parent;
   if (!root || !id) return;
-  const orb = root.children.find(
-    (c) => c instanceof THREE.Sprite && c.userData.nodeId === id,
-  ) as THREE.Sprite | undefined;
+  // Walk children and pick out the orb sprite (additive blend) AND
+  // the label sprite (depthTest false). Both share userData.nodeId.
+  let orb: THREE.Sprite | undefined;
+  let label: THREE.Sprite | undefined;
+  for (const c of root.children) {
+    if (!(c instanceof THREE.Sprite)) continue;
+    if (c.userData.nodeId !== id) continue;
+    const m = c.material as THREE.SpriteMaterial;
+    if (m.blending === THREE.AdditiveBlending) orb = c;
+    else label = c;
+  }
   if (!orb) return;
   const mat = orb.material as THREE.SpriteMaterial;
   const c =
@@ -356,10 +451,15 @@ export function setNodeColor(
         ? COLOR_NODE_HOVER
         : COLOR_NODE_BASE;
   mat.color.setHex(c);
-  // Visual feedback: hover/active orbs swell ~60% so they read
-  // immediately even though the base orb is intentionally tiny.
-  const s = state === "base" ? ORB_SCALE : ORB_SCALE * 1.6;
-  orb.scale.set(s, s, 1);
+  // Hover/active orbs swell ~50% from THEIR base scale so high-
+  // importance roots and tiny leaves both pop proportionally.
+  const baseScale = (orb.userData.baseScale as number | undefined) ?? 0.18;
+  const factor = state === "base" ? 1 : 1.5;
+  orb.scale.set(baseScale * factor, baseScale * factor, 1);
+  if (label) {
+    const labelBase = (label.userData.baseScale as number | undefined) ?? baseScale * 0.85;
+    label.scale.set(labelBase * factor, labelBase * factor, 1);
+  }
 }
 
 export function projectNodeToScreen(
@@ -423,7 +523,8 @@ export function updateAnimations(refs: SceneRefs): boolean {
     if (pick) pick.position.copy(anim.current);
     const label = refs.labelSprites.get(id);
     if (label) {
-      label.position.set(anim.current.x + 0.18, anim.current.y + 0.12, anim.current.z);
+      // Label stacks ON the orb (text inside the halo), not offset.
+      label.position.copy(anim.current);
     }
   });
   return stillAnimating;
