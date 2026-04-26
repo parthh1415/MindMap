@@ -44,6 +44,9 @@ PORT = int(os.getenv("TOPOLOGY_AGENT_PORT", "8001"))
 SEED = os.getenv("TOPOLOGY_AGENT_SEED") or "mindmap-topology-default-seed"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 BACKEND_DIFF_ENDPOINT = f"{BACKEND_URL.rstrip('/')}/internal/topology-diff"
+BACKEND_PARTIAL_NODE_ENDPOINT = (
+    f"{BACKEND_URL.rstrip('/')}/internal/topology-partial-node"
+)
 
 agent = Agent(
     name="mindmap_topology",
@@ -66,11 +69,24 @@ async def _on_startup(ctx: Context) -> None:
 @agent.on_message(model=TopologyRequest)
 async def _handle_topology(ctx: Context, sender: str, msg: TopologyRequest) -> None:
     logger.info("TopologyRequest session=%s speaker=%s", msg.session_id, msg.speaker_id)
+
+    async def _emit_partial_node(node: dict) -> None:
+        """Fire-and-forget POST of one partial node to the backend."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    BACKEND_PARTIAL_NODE_ENDPOINT,
+                    json={"session_id": msg.session_id, "node": node},
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("partial-node POST failed: %s", exc)
+
     try:
-        diff: TopologyDiff = await llm.stream_topology_diff(
+        diff: TopologyDiff = await llm.stream_topology_diff_iter(
             graph_json=msg.current_graph_json,
             last_words=msg.last_n_words,
             session_id=msg.session_id,
+            on_partial_node=_emit_partial_node,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Topology generation failed: %s", exc)

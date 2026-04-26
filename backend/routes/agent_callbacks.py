@@ -4,9 +4,17 @@ These give the agents a transport-agnostic way to deliver TopologyDiff and
 EnrichmentResponse payloads back to the backend (in addition to the native
 uagents message channel). Both shapes mirror the uagents message classes in
 ``shared.agent_messages``.
+
+Streaming additions:
+- ``POST /internal/topology-partial-node`` — invoked once per
+  ``additions_nodes[i]`` as soon as the streaming JSON parser closes the
+  object. We persist the node and broadcast immediately; the per-session
+  set of already-broadcast labels is consulted by the final
+  ``/internal/topology-diff`` POST so the same node isn't created twice.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,9 +26,20 @@ from backend.db.client import get_db
 from backend.ws.graph_socket import (
     apply_topology_diff,
     broadcast_node_enriched,
+    broadcast_node_upsert,
 )
 
 router = APIRouter(tags=["agent-callbacks"])
+
+
+# Per-session lower/stripped labels we've already broadcast as partials.
+# Cleared once the matching ``/internal/topology-diff`` settles.
+_partial_broadcast: dict[str, set[str]] = {}
+_partial_lock = asyncio.Lock()
+
+
+def _norm_label(label: Any) -> str:
+    return str(label or "").lower().strip()
 
 
 class TopologyDiffBody(BaseModel):
@@ -31,16 +50,75 @@ class TopologyDiffBody(BaseModel):
     edge_updates: list[dict] = Field(default_factory=list)
 
 
+class TopologyPartialNodeBody(BaseModel):
+    session_id: str
+    node: dict
+    request_id: str | None = None
+
+
 class EnrichmentResponseBody(BaseModel):
     session_id: str
     node_id: str
     info_entries: list[str]
 
 
+@router.post("/internal/topology-partial-node")
+async def post_topology_partial_node(
+    body: TopologyPartialNodeBody,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Create-and-broadcast a single partial node from the streaming agent.
+
+    Idempotent per (session_id, normalized label): a duplicate POST returns
+    ``{"ok": True, "duplicate": True}`` without creating another node.
+    """
+    from datetime import datetime, timezone
+
+    label_norm = _norm_label(body.node.get("label"))
+    if not label_norm:
+        # No usable label — can't dedupe; reject quietly.
+        raise HTTPException(400, "node.label is required")
+
+    async with _partial_lock:
+        seen = _partial_broadcast.setdefault(body.session_id, set())
+        if label_norm in seen:
+            return {"ok": True, "duplicate": True}
+        # Reserve the label up front so concurrent posts (e.g. retried
+        # network requests) don't both create.
+        seen.add(label_norm)
+
+    now = datetime.now(timezone.utc)
+    node = dict(body.node)
+    ghost_id = node.pop("ghost_id", None)
+    node["session_id"] = body.session_id
+    node.setdefault("created_at", now)
+    node.setdefault("updated_at", now)
+    node.setdefault("info", [])
+    node.setdefault("importance_score", 1.0)
+
+    try:
+        created = await nodes_repo.create_node(db, node)
+    except Exception:
+        # On persistence failure, release the reservation so a later retry
+        # can try again.
+        async with _partial_lock:
+            _partial_broadcast.get(body.session_id, set()).discard(label_norm)
+        raise
+
+    await broadcast_node_upsert(body.session_id, created, resolves_ghost_id=ghost_id)
+    return {"ok": True, "node_id": created.get("_id")}
+
+
 @router.post("/internal/topology-diff")
 async def post_topology_diff(
     body: TopologyDiffBody, db: AsyncIOMotorDatabase = Depends(get_db)
 ):
+    # Snapshot + clear the per-session partial-broadcast set so this diff
+    # acts as the "settle" — anything not yet broadcast becomes broadcast,
+    # then the set resets for the next user utterance.
+    async with _partial_lock:
+        seen = _partial_broadcast.pop(body.session_id, set())
+
     await apply_topology_diff(
         db,
         session_id=body.session_id,
@@ -48,6 +126,7 @@ async def post_topology_diff(
         additions_edges=body.additions_edges,
         merges=body.merges,
         edge_updates=body.edge_updates,
+        dedupe_labels=seen,
     )
     return {"ok": True}
 

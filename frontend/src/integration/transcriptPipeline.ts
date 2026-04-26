@@ -25,7 +25,10 @@ import {
   type TranscriptPipelineHandle,
 } from "@mindmap/transcript-client";
 import type { TranscriptChunk } from "@shared/ws_messages";
-import { processTranscriptPartial } from "@/lib/optimisticGhosts";
+import {
+  processTranscriptFinal,
+  processTranscriptPartial,
+} from "@/lib/optimisticGhosts";
 import { useTranscriptStore } from "@/state/transcriptStore";
 
 export interface UseTranscriptPipelineArgs {
@@ -71,14 +74,18 @@ export function useTranscriptPipeline({
       } else {
         tStore.pushPartial(chunk.speaker_id, chunk.text);
       }
-      // 3. Drive optimistic ghosts on PARTIALS — finals are authoritative
-      //    and the topology agent + Groq will produce real nodes for those.
-      if (!chunk.is_final) {
-        try {
+      // 3. Drive optimistic ghosts on BOTH partials and finals. The Groq /
+      //    Gemini topology agents can saturate and silently emit empty
+      //    diffs — the SWARM ghost layer keeps the canvas alive in that
+      //    window. Partials use a short TTL; finals use a longer one.
+      try {
+        if (chunk.is_final) {
+          processTranscriptFinal(chunk.text, chunk.speaker_id);
+        } else {
           processTranscriptPartial(chunk.text, chunk.speaker_id);
-        } catch (err) {
-          console.warn("[transcriptPipeline] ghost extractor failed", err);
         }
+      } catch (err) {
+        console.warn("[transcriptPipeline] ghost extractor failed", err);
       }
     };
 

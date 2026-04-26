@@ -198,3 +198,159 @@ def test_is_429_detection():
         pass
 
     assert llm._is_429(_NotRate("nope")) is False
+
+
+# ---------------------------------------------------------------------------
+# _PartialNodeParser tests
+# ---------------------------------------------------------------------------
+def _feed_chunks(parser: "llm._PartialNodeParser", chunks: list[str]) -> list[dict]:
+    out: list[dict] = []
+    for c in chunks:
+        out.extend(list(parser.feed(c)))
+    return out
+
+
+def test_partial_parser_emits_two_nodes_in_order():
+    payload = json.dumps(
+        {
+            "additions_nodes": [
+                {"label": "A", "speaker_id": "s1"},
+                {"label": "B", "speaker_id": "s2"},
+            ],
+            "additions_edges": [],
+            "merges": [],
+            "edge_updates": [],
+        }
+    )
+    # Feed everything in many small chunks so partials are exercised.
+    parser = llm._PartialNodeParser()
+    chunks = [payload[i : i + 5] for i in range(0, len(payload), 5)]
+    nodes = _feed_chunks(parser, chunks)
+    assert [n["label"] for n in nodes] == ["A", "B"]
+
+
+def test_partial_parser_tolerates_braces_in_strings():
+    payload = json.dumps(
+        {
+            "additions_nodes": [
+                {"label": "a {b} c", "speaker_id": None},
+                {"label": "x [y] z", "speaker_id": None},
+            ],
+            "additions_edges": [],
+            "merges": [],
+            "edge_updates": [],
+        }
+    )
+    parser = llm._PartialNodeParser()
+    nodes = list(parser.feed(payload))
+    assert [n["label"] for n in nodes] == ["a {b} c", "x [y] z"]
+
+
+def test_partial_parser_tolerates_whitespace_between_objects():
+    raw = (
+        '{"additions_nodes":[\n'
+        '  {"label":"one"},\n\n'
+        '  {"label":"two"}  \n'
+        '],"additions_edges":[],"merges":[],"edge_updates":[]}'
+    )
+    parser = llm._PartialNodeParser()
+    nodes = list(parser.feed(raw))
+    assert [n["label"] for n in nodes] == ["one", "two"]
+
+
+def test_partial_parser_reentrant_split_mid_object():
+    payload = json.dumps(
+        {
+            "additions_nodes": [
+                {"label": "first", "speaker_id": "s"},
+                {"label": "second", "speaker_id": "s"},
+            ],
+            "additions_edges": [],
+            "merges": [],
+            "edge_updates": [],
+        }
+    )
+    # Find a split point inside the first object.
+    split = payload.index('"first"') + 3
+    chunk1 = payload[:split]
+    chunk2 = payload[split:]
+    parser = llm._PartialNodeParser()
+    nodes_a = list(parser.feed(chunk1))
+    assert nodes_a == []  # first object not yet closed
+    nodes_b = list(parser.feed(chunk2))
+    assert [n["label"] for n in nodes_b] == ["first", "second"]
+
+
+def test_partial_parser_ignores_objects_outside_additions_nodes():
+    payload = json.dumps(
+        {
+            "additions_edges": [{"source_id": "x", "target_id": "y"}],
+            "additions_nodes": [{"label": "only_one"}],
+            "merges": [],
+            "edge_updates": [],
+        }
+    )
+    parser = llm._PartialNodeParser()
+    nodes = list(parser.feed(payload))
+    assert [n["label"] for n in nodes] == ["only_one"]
+
+
+# ---------------------------------------------------------------------------
+# stream_topology_diff_iter tests
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_stream_topology_diff_iter_emits_partials_in_order():
+    payload = {
+        "additions_nodes": [
+            {"label": "alpha", "speaker_id": "s1"},
+            {"label": "beta", "speaker_id": "s2"},
+        ],
+        "additions_edges": [],
+        "merges": [],
+        "edge_updates": [],
+    }
+    full = json.dumps(payload)
+    chunks = [full[i : i + 7] for i in range(0, len(full), 7)]
+    provider = _FakeStreamingProvider(chunks)
+
+    seen: list[dict] = []
+
+    async def cb(node: dict) -> None:
+        seen.append(node)
+
+    diff = await llm.stream_topology_diff_iter(
+        graph_json="{}",
+        last_words="x",
+        system_prompt="SYS",
+        session_id="sess",
+        on_partial_node=cb,
+        provider=provider,
+    )
+    assert [n["label"] for n in seen] == ["alpha", "beta"]
+    assert [n["label"] for n in diff.additions_nodes] == ["alpha", "beta"]
+    assert provider.stream_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_topology_diff_iter_truncates(monkeypatch):
+    too_many = [{"label": f"n{i}"} for i in range(10)]
+    payload = {
+        "additions_nodes": too_many,
+        "additions_edges": [],
+        "merges": [],
+        "edge_updates": [],
+    }
+    provider = _FakeStreamingProvider([json.dumps(payload)])
+
+    async def cb(_: dict) -> None:
+        return
+
+    diff = await llm.stream_topology_diff_iter(
+        graph_json="{}",
+        last_words="x",
+        system_prompt="SYS",
+        session_id="sess",
+        on_partial_node=cb,
+        provider=provider,
+    )
+    assert len(diff.additions_nodes) == llm.MAX_ADDITION_NODES == 5

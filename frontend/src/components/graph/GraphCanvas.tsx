@@ -21,6 +21,10 @@ import { useForceLayout } from "@/lib/forceLayout";
 import SolidNode, { type SolidNodeData } from "./SolidNode";
 import GhostNode, { type GhostNodeData } from "./GhostNode";
 import EdgeRenderer, { type GraphEdgeData } from "./EdgeRenderer";
+import PredictiveEdgesLayer from "./PredictiveEdgesLayer";
+import SpeakerTrailsLayer from "./SpeakerTrailsLayer";
+import { usePredictiveEdgePruner } from "@/lib/predictiveEdges";
+import { useTrailDecayer } from "@/lib/speakerTrail";
 
 const NODE_TYPES: NodeTypes = {
   solid: SolidNode,
@@ -41,6 +45,11 @@ const EDGE_TYPES: EdgeTypes = {
  * the ghost→solid morph. (See GhostNode + SolidNode.)
  */
 function GraphCanvasInner() {
+  // Auto-prune predictive edges (TTL + edge_upsert supersession) and
+  // decay speaker trail points. Both are no-op intervals with cleanup.
+  usePredictiveEdgePruner();
+  useTrailDecayer();
+
   const nodes = useNodeList();
   const edges = useEdgeList();
   const ghosts = useGhostList();
@@ -187,6 +196,8 @@ function GraphCanvasInner() {
           zoomOnScroll
           proOptions={{ hideAttribution: true }}
         >
+          <SpeakerTrailsLayer positions={positions} />
+          <PredictiveEdgesLayer positions={positions} />
           <Controls position="bottom-right" showInteractive={false} />
         </ReactFlow>
         <style>{`

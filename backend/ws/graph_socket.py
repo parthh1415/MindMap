@@ -181,12 +181,18 @@ async def apply_topology_diff(
     additions_edges: list[dict],
     merges: list[dict],
     edge_updates: list[dict],
+    dedupe_labels: Optional[set[str]] = None,
 ) -> None:
     """Persist topology diff and broadcast to subscribers.
 
     Each addition node may carry an optional ``ghost_id`` field set by the
     topology agent — we strip it before persistence and pass it through as
     ``resolves_ghost_id`` on the broadcast event.
+
+    When ``dedupe_labels`` is supplied (a set of lower/stripped label
+    strings), any addition node whose label matches an entry will be
+    skipped — both persistence and broadcast — on the assumption that the
+    partial-node streaming endpoint already created+broadcast it.
     """
     now = datetime.now(timezone.utc)
 
@@ -196,6 +202,10 @@ async def apply_topology_diff(
 
     for raw in additions_nodes:
         node = dict(raw)
+        label_norm = str(node.get("label") or "").lower().strip()
+        if dedupe_labels is not None and label_norm and label_norm in dedupe_labels:
+            # Already created/broadcast as a partial — skip to avoid dupes.
+            continue
         ghost_id = node.pop("ghost_id", None)
         node["session_id"] = session_id
         node.setdefault("created_at", now)

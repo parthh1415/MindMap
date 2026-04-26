@@ -145,7 +145,11 @@ describe("frontend integration: transcript pipeline", () => {
     expect(ghosts.length).toBeGreaterThan(0);
   });
 
-  it("does NOT seed ghosts on final chunks (final = authoritative path)", async () => {
+  it("seeds ghosts on FINAL chunks too — SWARM behavior", async () => {
+    // Pre-SWARM, finals were authoritative-only and the client did not
+    // seed ghosts on them. Post-SWARM, both partials AND finals seed
+    // ghosts (with longer TTL on finals) so the canvas shows activity
+    // even when the LLM topology agent is throttled.
     render(<Harness sessionId="sess-1" enabled={true} />);
     await act(async () => {
       await Promise.resolve();
@@ -163,7 +167,7 @@ describe("frontend integration: transcript pipeline", () => {
     });
 
     expect(mocks.bridgeSends.length).toBe(1);
-    expect(Object.keys(useGraphStore.getState().ghostNodes).length).toBe(0);
+    expect(Object.keys(useGraphStore.getState().ghostNodes).length).toBeGreaterThan(0);
   });
 
   it("tears down pipeline + bridge on unmount", async () => {

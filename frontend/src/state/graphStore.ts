@@ -34,10 +34,33 @@ const SPEAKER_TOKENS = [
 // Store
 // ─────────────────────────────────────────────────────────────────────
 
+/** Predictive edge: speculative connection drawn between two graph
+ *  entities (real or ghost) BEFORE the topology agent confirms it.
+ *  Rendered visually distinct (faint, slow-pulsing) and pruned when
+ *  superseded by a real `edge_upsert` or after a TTL. */
+export type PredictiveEdge = {
+  id: string;            // synthetic id
+  source_id: string;     // node id OR ghost_id
+  target_id: string;
+  speaker_id: string;
+  created_at: number;    // epoch ms
+};
+
+/** A trail point — the most recent node/ghost the active speaker
+ *  "touched". Drawn as a thin line connecting their last 2-3 concepts
+ *  to telegraph conversational momentum. */
+export type SpeakerTrailPoint = {
+  entity_id: string;     // node id OR ghost_id
+  speaker_id: string;
+  ts: number;            // epoch ms
+};
+
 type GraphStore = {
   nodes: Record<string, ContractNode>;
   edges: Record<string, ContractEdge>;
   ghostNodes: Record<string, GhostNode>;
+  predictiveEdges: Record<string, PredictiveEdge>;
+  speakerTrails: Record<string, SpeakerTrailPoint[]>; // per speaker, most recent first
   selectedNodeId: string | null;
   timelineMode: TimelineMode;
   speakerColors: Record<string, string>; // speaker_id → CSS var
@@ -68,6 +91,14 @@ type GraphStore = {
   ensureSpeakerColor: (speaker_id: string) => string;
   setActiveSpeaker: (speaker_id: string | null) => void;
 
+  // ── predictive edges (option D) ──
+  addPredictiveEdge: (e: Omit<PredictiveEdge, "id" | "created_at">) => string;
+  removePredictiveEdge: (id: string) => void;
+  clearPredictiveEdgesFor: (entity_id: string) => void;
+
+  // ── speaker trails (option D) ──
+  pushSpeakerTrail: (speaker_id: string, entity_id: string) => void;
+
   // ── reset ──
   resetGraph: () => void;
 };
@@ -87,10 +118,18 @@ function assignSpeakerColor(
   return { ...current, [speaker_id]: SPEAKER_TOKENS[idx] };
 }
 
+let _predictiveCounter = 0;
+const nextPredictiveId = () =>
+  `pe-${Date.now().toString(36)}-${++_predictiveCounter}`;
+
+const TRAIL_LIMIT_PER_SPEAKER = 4;
+
 export const useGraphStore = create<GraphStore>((set, get) => ({
   nodes: {},
   edges: {},
   ghostNodes: {},
+  predictiveEdges: {},
+  speakerTrails: {},
   selectedNodeId: null,
   timelineMode: { active: false },
   speakerColors: {},
@@ -224,11 +263,58 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
 
   setActiveSpeaker: (speaker_id) => set({ activeSpeakerId: speaker_id }),
 
+  addPredictiveEdge: ({ source_id, target_id, speaker_id }) => {
+    const id = nextPredictiveId();
+    set((s) => ({
+      predictiveEdges: {
+        ...s.predictiveEdges,
+        [id]: { id, source_id, target_id, speaker_id, created_at: Date.now() },
+      },
+    }));
+    return id;
+  },
+
+  removePredictiveEdge: (id) =>
+    set((s) => {
+      if (!s.predictiveEdges[id]) return {};
+      const next = { ...s.predictiveEdges };
+      delete next[id];
+      return { predictiveEdges: next };
+    }),
+
+  clearPredictiveEdgesFor: (entity_id) =>
+    set((s) => {
+      const next: Record<string, PredictiveEdge> = {};
+      let changed = false;
+      for (const [k, v] of Object.entries(s.predictiveEdges)) {
+        if (v.source_id === entity_id || v.target_id === entity_id) {
+          changed = true;
+          continue;
+        }
+        next[k] = v;
+      }
+      return changed ? { predictiveEdges: next } : {};
+    }),
+
+  pushSpeakerTrail: (speaker_id, entity_id) =>
+    set((s) => {
+      const prev = s.speakerTrails[speaker_id] ?? [];
+      // Skip if this is the same entity as the most-recent point.
+      if (prev[0]?.entity_id === entity_id) return {};
+      const next = [{ entity_id, speaker_id, ts: Date.now() }, ...prev].slice(
+        0,
+        TRAIL_LIMIT_PER_SPEAKER,
+      );
+      return { speakerTrails: { ...s.speakerTrails, [speaker_id]: next } };
+    }),
+
   resetGraph: () =>
     set({
       nodes: {},
       edges: {},
       ghostNodes: {},
+      predictiveEdges: {},
+      speakerTrails: {},
       selectedNodeId: null,
       timelineMode: { active: false },
       animationQueue: [],
