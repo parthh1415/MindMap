@@ -47,6 +47,9 @@ def _load_prompt(name: str) -> str:
 
 
 def _build_provider() -> "_llm.LLMProvider":
+    # Phase 12: prefer OpenAI when its key is set; otherwise Groq.
+    if os.getenv("OPENAI_API_KEY"):
+        return _llm.OpenAIProvider()
     return _llm.GroqProvider()
 
 

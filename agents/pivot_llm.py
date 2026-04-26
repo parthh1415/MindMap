@@ -113,6 +113,9 @@ def _coerce_pivots(data: dict | list) -> list[dict]:
 
 
 def _build_provider() -> "llm.LLMProvider":
+    # Phase 12: prefer OpenAI when its key is set; otherwise Groq.
+    if os.getenv("OPENAI_API_KEY"):
+        return llm.OpenAIProvider()
     return llm.GroqProvider()
 
 

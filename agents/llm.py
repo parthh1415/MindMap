@@ -30,6 +30,7 @@ logger = logging.getLogger("agents.llm")
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_MODEL = "gemini-2.5-flash"
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-nano")
 
 MAX_ADDITION_NODES = 5
 MAX_RETRIES_429 = 2
@@ -86,6 +87,63 @@ class GroqProvider:
     async def generate_json(self, prompt: str, system: str) -> dict | list:
         resp = await self._client.chat.completions.create(
             model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        content = resp.choices[0].message.content or "{}"
+        return json.loads(content)
+
+
+# ---------------------------------------------------------------------------
+# OpenAI provider (primary — user-provided paid key, overrides the original
+# free-tier-only rule. The Groq + Gemini providers below are kept as
+# cascading fallbacks so demos never go silent if the OpenAI key fails.)
+# ---------------------------------------------------------------------------
+class OpenAIProvider:
+    """OpenAI client wrapper. Uses the official ``openai`` SDK.
+
+    Default model is ``OPENAI_MODEL`` (env, defaults to ``gpt-4.1-nano`` —
+    the cheapest / fastest tier). Supports JSON-mode streaming exactly the
+    same way Groq does, so it slots into the existing ``LLMProvider``
+    protocol without touching any caller.
+    """
+
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        if not self.api_key:
+            raise RuntimeError("OPENAI_API_KEY not set")
+        from openai import AsyncOpenAI
+
+        self._client = AsyncOpenAI(api_key=self.api_key)
+
+    async def stream_json(self, prompt: str, system: str) -> AsyncIterator[str]:
+        """Yield content deltas as they arrive. JSON-mode."""
+        stream = await self._client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            stream=True,
+            temperature=0.2,
+        )
+        async for chunk in stream:
+            try:
+                delta = chunk.choices[0].delta
+                content = getattr(delta, "content", None)
+                if content:
+                    yield content
+            except (AttributeError, IndexError):
+                continue
+
+    async def generate_json(self, prompt: str, system: str) -> dict | list:
+        resp = await self._client.chat.completions.create(
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -201,7 +259,32 @@ async def _stream_to_json(provider: LLMProvider, prompt: str, system: str) -> di
 
 
 def _build_topology_provider() -> LLMProvider:
+    """Primary LLM picker. Prefers OpenAI when its key is present (user
+    flipped this in Phase 12); otherwise falls back to Groq."""
+    if os.getenv("OPENAI_API_KEY"):
+        return OpenAIProvider()
     return GroqProvider()
+
+
+def _build_fallback_provider_chain() -> list["LLMProvider"]:
+    """Ordered fallback chain used when the primary provider hits a rate
+    limit. Returns the providers we should try, in order, *excluding*
+    the primary."""
+    chain: list[LLMProvider] = []
+    primary_is_openai = bool(os.getenv("OPENAI_API_KEY"))
+    # If primary is OpenAI, fall back to Groq next (still fast), then Gemini.
+    if primary_is_openai:
+        if os.getenv("GROQ_API_KEY"):
+            try:
+                chain.append(GroqProvider())
+            except Exception:  # noqa: BLE001
+                pass
+    if os.getenv("GEMINI_API_KEY"):
+        try:
+            chain.append(GeminiProvider())
+        except Exception:  # noqa: BLE001
+            pass
+    return chain
 
 
 def _truncate_additions(diff_dict: dict) -> dict:
@@ -247,26 +330,29 @@ async def stream_topology_diff(
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
             if _is_429(exc) and attempt < MAX_RETRIES_429:
-                logger.warning("Groq 429; retry %d/%d after %.1fs",
+                logger.warning("primary LLM 429; retry %d/%d after %.1fs",
                                attempt + 1, MAX_RETRIES_429, RETRY_SLEEP_SECONDS)
                 await asyncio.sleep(RETRY_SLEEP_SECONDS)
                 continue
-            # If we exhausted retries on a 429, try Gemini fallback.
-            if _is_429(exc) and os.getenv("GEMINI_API_KEY"):
-                logger.warning("Groq exhausted 429 retries; falling back to Gemini")
-                try:
-                    fallback = GeminiProvider()
-                    diff_dict = await _stream_to_json(fallback, user_prompt, system)
-                    diff_dict = _truncate_additions(diff_dict)
-                    return TopologyDiff(
-                        session_id=session_id,
-                        additions_nodes=diff_dict.get("additions_nodes", []) or [],
-                        additions_edges=diff_dict.get("additions_edges", []) or [],
-                        merges=diff_dict.get("merges", []) or [],
-                        edge_updates=diff_dict.get("edge_updates", []) or [],
-                    )
-                except Exception as fb_exc:  # noqa: BLE001
-                    last_exc = fb_exc
+            # Exhausted primary 429 retries — walk the cascading fallback
+            # chain (Groq → Gemini, when primary is OpenAI).
+            if _is_429(exc):
+                for fallback in _build_fallback_provider_chain():
+                    fb_name = type(fallback).__name__
+                    logger.warning("primary exhausted 429; trying %s", fb_name)
+                    try:
+                        diff_dict = await _stream_to_json(fallback, user_prompt, system)
+                        diff_dict = _truncate_additions(diff_dict)
+                        return TopologyDiff(
+                            session_id=session_id,
+                            additions_nodes=diff_dict.get("additions_nodes", []) or [],
+                            additions_edges=diff_dict.get("additions_edges", []) or [],
+                            merges=diff_dict.get("merges", []) or [],
+                            edge_updates=diff_dict.get("edge_updates", []) or [],
+                        )
+                    except Exception as fb_exc:  # noqa: BLE001
+                        last_exc = fb_exc
+                        continue
             break
     raise RuntimeError(f"stream_topology_diff failed: {last_exc!r}") from last_exc
 
@@ -298,13 +384,14 @@ async def generate_enrichment(
             if _is_429(exc) and attempt < MAX_RETRIES_429:
                 await asyncio.sleep(RETRY_SLEEP_SECONDS)
                 continue
-            if _is_429(exc) and os.getenv("GEMINI_API_KEY"):
-                try:
-                    fallback = GeminiProvider()
-                    data = await fallback.generate_json(user_prompt, system)
-                    return _coerce_points(data)
-                except Exception as fb_exc:  # noqa: BLE001
-                    last_exc = fb_exc
+            if _is_429(exc):
+                for fallback in _build_fallback_provider_chain():
+                    try:
+                        data = await fallback.generate_json(user_prompt, system)
+                        return _coerce_points(data)
+                    except Exception as fb_exc:  # noqa: BLE001
+                        last_exc = fb_exc
+                        continue
             break
     raise RuntimeError(f"generate_enrichment failed: {last_exc!r}") from last_exc
 
