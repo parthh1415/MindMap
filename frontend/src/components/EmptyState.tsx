@@ -77,7 +77,10 @@ export function EmptyState() {
           <span className="es-wordmark">MINDMAP</span>
         </div>
 
-        <h1 className="es-headline">Speak. The map appears.</h1>
+        <h1 className="es-headline">
+          <span className="es-headline-text">Speak. The map appears.</span>
+          {!reduce ? <span className="es-sweep" aria-hidden /> : null}
+        </h1>
 
         <p className="es-sub">
           A live mind-map builds itself from your conversation. There is no
@@ -171,13 +174,41 @@ export function EmptyState() {
           color: var(--text-tertiary);
         }
         .es-headline {
+          position: relative;
+          display: inline-block;
           font-family: var(--font-display);
-          font-size: var(--fs-3xl);
+          font-size: var(--fs-display-2);
           font-weight: 600;
           color: var(--text-primary);
-          letter-spacing: -0.022em;
-          line-height: 1.05;
+          letter-spacing: var(--tracking-display);
+          line-height: var(--lh-display);
           margin: 0;
+          isolation: isolate;
+        }
+        .es-headline-text { position: relative; z-index: 1; }
+        .es-sweep {
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(
+            90deg,
+            transparent 0%,
+            color-mix(in srgb, var(--signature-accent) 22%, transparent) 48%,
+            color-mix(in srgb, var(--signature-accent) 35%, transparent) 50%,
+            color-mix(in srgb, var(--signature-accent) 22%, transparent) 52%,
+            transparent 100%
+          );
+          mix-blend-mode: screen;
+          background-size: 280% 100%;
+          background-position: 200% 0;
+          animation: es-sweep 7s ease-in-out infinite;
+          pointer-events: none;
+          z-index: 2;
+        }
+        @keyframes es-sweep {
+          0%   { background-position: -200% 0; opacity: 0; }
+          25%  { opacity: 1; }
+          75%  { opacity: 1; }
+          100% { background-position: 200% 0;  opacity: 0; }
         }
         .es-sub {
           font-family: var(--font-body);

@@ -68,6 +68,37 @@ a {
   font-feature-settings: "tnum" 1;
 }
 
+/* ─────────── Shared glass surface ─────────── */
+/* Used by TopBar, drawers, modals, scrubber, transcript-stream and any
+ * floating chrome. Keeps the depth language consistent across the app. */
+.glass-surface {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  box-shadow: var(--shadow-md);
+}
+.glass-surface--strong {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ─────────── Micro-noise overlay ─────────── */
+/* A 2% tactile noise pinned to the canvas under everything but the
+ * ambient gradient. Adds a hint of grain so the OLED-black doesn't read
+ * as plastic. SVG inlined so it ships with the bundle. */
+.noise-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.022;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg viewBox='0 0 240 240' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 240px 240px;
+}
+
 .font-display { font-family: var(--font-display); }
 .font-body    { font-family: var(--font-body); }
 .font-mono    { font-family: var(--font-mono); }

@@ -92,6 +92,7 @@ function App() {
   return (
     <div className="app-shell">
       <div className="ambient-bg" aria-hidden />
+      <div className="noise-overlay" aria-hidden />
       <TopBar />
       <main className="app-main">
         <GraphCanvas />

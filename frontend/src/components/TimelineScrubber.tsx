@@ -239,20 +239,35 @@ export function TimelineScrubber() {
         }
         .scrubber-track {
           position: relative;
-          height: 28px;
-          background: var(--bg-base);
-          border-radius: var(--radius-pill);
+          height: 32px;
+          background:
+            /* film-strip hairlines every 4px for that oscilloscope/strip feel */
+            repeating-linear-gradient(
+              90deg,
+              rgba(255,255,255,0.05) 0px,
+              rgba(255,255,255,0.05) 1px,
+              transparent 1px,
+              transparent 4px
+            ),
+            linear-gradient(180deg,
+              color-mix(in srgb, var(--bg-base) 96%, var(--signature-accent)) 0%,
+              var(--bg-base) 100%);
+          border-radius: 6px;
           cursor: ew-resize;
           overflow: hidden;
           border: 1px solid var(--border-subtle);
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
         }
         .scrubber-fill {
           position: absolute;
           left: 0;
           top: 0;
           bottom: 0;
-          background: linear-gradient(90deg, var(--signature-accent-soft), var(--signature-accent));
-          opacity: 0.55;
+          background:
+            linear-gradient(90deg,
+              color-mix(in srgb, var(--signature-accent) 8%, transparent),
+              color-mix(in srgb, var(--signature-accent) 32%, transparent));
+          mix-blend-mode: screen;
           pointer-events: none;
         }
         .scrubber-tick {

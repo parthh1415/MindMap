@@ -36,7 +36,20 @@ export function TopBar() {
     <header className="topbar">
       <div className="topbar-left">
         <span className="topbar-mark" aria-hidden>
-          <span className="topbar-mark-dot" />
+          <svg className="topbar-mark-glyph" viewBox="0 0 18 18" width="16" height="16">
+            <defs>
+              <radialGradient id="phosphor" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0%" stopColor="var(--signature-accent)" stopOpacity="1" />
+                <stop offset="100%" stopColor="var(--signature-accent)" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <circle cx="9" cy="9" r="8" fill="url(#phosphor)" opacity="0.55" />
+            <circle cx="9" cy="9" r="2.4" fill="var(--signature-accent)" />
+            <circle cx="3" cy="14" r="1.1" fill="var(--signature-accent)" opacity="0.78" />
+            <circle cx="15" cy="4" r="1.1" fill="var(--signature-accent)" opacity="0.78" />
+            <line x1="9" y1="9" x2="3" y2="14" stroke="var(--signature-accent)" strokeWidth="0.6" opacity="0.32" />
+            <line x1="9" y1="9" x2="15" y2="4" stroke="var(--signature-accent)" strokeWidth="0.6" opacity="0.32" />
+          </svg>
           <span className="topbar-mark-text">MINDMAP</span>
         </span>
         <span className="topbar-divider" aria-hidden />
@@ -146,6 +159,10 @@ export function TopBar() {
           background: var(--signature-accent);
           box-shadow: 0 0 14px var(--signature-accent-glow);
           display: inline-block;
+        }
+        .topbar-mark-glyph {
+          display: inline-block;
+          filter: drop-shadow(0 0 10px var(--signature-accent-glow));
         }
         .topbar-mark-text {
           font-family: var(--font-display);
