@@ -21,6 +21,13 @@ const config: UserConfig & { test?: unknown } = {
     port: 5173,
     strictPort: false,
   },
+  optimizeDeps: {
+    exclude: [
+      "@tensorflow/tfjs-backend-wasm",
+      "@mediapipe/hands",
+      "@tensorflow-models/hand-pose-detection",
+    ],
+  },
   test: {
     globals: true,
     environment: "jsdom",
