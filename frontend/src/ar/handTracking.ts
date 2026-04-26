@@ -150,23 +150,75 @@ import {
   SupportedModels,
   type HandDetector,
 } from "@tensorflow-models/hand-pose-detection";
-import "@tensorflow/tfjs-backend-webgl";
 import * as tf from "@tensorflow/tfjs-core";
 
 let detector: HandDetector | null = null;
+let mediapipeScriptLoadPromise: Promise<void> | null = null;
+
+/**
+ * Inject /mediapipe/hands/hands.js as a <script> tag and resolve when it
+ * has finished installing `window.Hands`. The IIFE registers itself via
+ * `za("Hands", od)` (Closure Library) so we can detect completion by
+ * polling for `window.Hands`.
+ *
+ * Memoized — only loads once per session.
+ */
+function loadMediaPipeHandsScript(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.Hands) return Promise.resolve();
+  if (mediapipeScriptLoadPromise) return mediapipeScriptLoadPromise;
+
+  mediapipeScriptLoadPromise = new Promise<void>((resolve, reject) => {
+    const src = `${window.location.origin}/mediapipe/hands/hands.js`;
+    // If a prior attempt already added the tag, don't add it again.
+    const existing = document.querySelector(
+      `script[data-mp-hands="1"]`,
+    ) as HTMLScriptElement | null;
+    if (existing) {
+      const tick = () => {
+        if (window.Hands) resolve();
+        else setTimeout(tick, 30);
+      };
+      tick();
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = false;
+    s.dataset.mpHands = "1";
+    s.onload = () => {
+      // hands.js synchronously installs window.Hands inside its IIFE,
+      // so by the time onload fires the global is set. Sanity check.
+      if (window.Hands) resolve();
+      else
+        reject(
+          new Error(
+            "/mediapipe/hands/hands.js loaded but did not set window.Hands",
+          ),
+        );
+    };
+    s.onerror = () =>
+      reject(new Error(`Failed to load ${src} (404 or network error)`));
+    document.head.appendChild(s);
+  });
+  return mediapipeScriptLoadPromise;
+}
 
 export async function initDetector(): Promise<HandDetector> {
   if (detector) return detector;
-  // tfjs runtime: pure WebGL, no MediaPipe IIFE, no solutionPath needed.
-  // Same MediaPipe-trained landmark model under the hood, just orchestrated
-  // by tfjs instead of MediaPipe's wasm. ~30-60fps on desktop is fine for
-  // post-session graph review.
-  await tf.setBackend("webgl");
+  // 1. Inject the @mediapipe/hands IIFE so the alias-stub's lazy Proxy
+  //    can forward `new Hands(config)` to the real constructor.
+  await loadMediaPipeHandsScript();
+  // 2. tfjs-core just needs to be ready — mediapipe runtime doesn't
+  //    use a tfjs backend for inference, but createDetector does some
+  //    light setup work that benefits from tf.ready().
   await tf.ready();
+  // 3. mediapipe runtime — accurate, fast, all assets local.
   detector = await createDetector(SupportedModels.MediaPipeHands, {
-    runtime: "tfjs",
+    runtime: "mediapipe",
     modelType: "full",
     maxHands: 2,
+    solutionPath: `${window.location.origin}/mediapipe/hands`,
   });
   return detector;
 }

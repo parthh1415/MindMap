@@ -1,40 +1,78 @@
 // Regression tests for the @mediapipe/hands → mediapipeHandsStub vite alias.
 //
-// Why this exists:
-//   The real @mediapipe/hands package is an IIFE script with zero ES exports.
-//   Strict ESM linkers fail at module load when hand-pose-detection's ESM
-//   build does `import { Hands } from "@mediapipe/hands"`. We work around
-//   it by aliasing the bare specifier to this stub. If anyone ever deletes
-//   the alias or replaces the stub, these tests fire before the runtime
-//   crash (which only surfaces when a user actually opens /ar in a browser).
+// The stub exports lazy Proxies that forward `new Hands(...)` and
+// `HAND_CONNECTIONS` to `window.Hands` / `window.HAND_CONNECTIONS` —
+// which are installed at runtime by /mediapipe/hands/hands.js (an IIFE
+// loaded as a <script> tag inside initDetector before createDetector
+// runs).
+//
+// These tests verify the vite alias is wired AND the Proxies forward
+// correctly when the globals are present. Without the alias, the
+// `import { Hands } from "@mediapipe/hands"` static import in
+// hand-pose-detection's ESM build would crash at module-load with
+// "Importing binding name 'Hands' is not found".
 
-import { describe, it, expect } from "vitest";
-import * as stub from "@/ar/mediapipeHandsStub";
-
-describe("mediapipeHandsStub — vite alias target for @mediapipe/hands", () => {
-  it("exports a `Hands` binding so the static ESM import resolves", () => {
-    // The exact value doesn't matter for tfjs-runtime users — what matters
-    // is that the named export EXISTS (otherwise the linker crashes).
-    expect("Hands" in stub).toBe(true);
-  });
-
-  it("exports HAND_CONNECTIONS as an iterable for symmetry with the real package", () => {
-    expect(Array.isArray(stub.HAND_CONNECTIONS)).toBe(true);
-  });
-
-  it("exports a string VERSION marker that identifies this as the stub (not the real lib)", () => {
-    expect(stub.VERSION).toBe("stub");
-  });
-});
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 describe("@mediapipe/hands bare-specifier resolves to our stub via vite alias", () => {
   it("imports cleanly without a 'binding name not found' linker error", async () => {
-    // Vite's alias rewrites this bare specifier at build/dev time. If the
-    // alias is removed, this dynamic import falls through to node_modules
-    // and the IIFE-only package — which has no Hands export — surfaces a
-    // "Importing binding name 'Hands' is not found" runtime error.
     const m = await import("@mediapipe/hands");
     expect(m).toBeDefined();
     expect("Hands" in m).toBe(true);
+    expect("HAND_CONNECTIONS" in m).toBe(true);
+  });
+});
+
+describe("mediapipeHandsStub Proxy behavior", () => {
+  beforeEach(() => {
+    // Reset window globals to a known state
+    delete (window as unknown as Record<string, unknown>).Hands;
+    delete (window as unknown as Record<string, unknown>).HAND_CONNECTIONS;
+  });
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).Hands;
+    delete (window as unknown as Record<string, unknown>).HAND_CONNECTIONS;
+  });
+
+  it("`new Hands(config)` throws a clear error when window.Hands isn't loaded", async () => {
+    const { Hands } = await import("@mediapipe/hands");
+    expect(() => new (Hands as new (cfg: unknown) => unknown)({})).toThrow(
+      /not loaded/,
+    );
+  });
+
+  it("`new Hands(config)` forwards to window.Hands once the IIFE has installed it", async () => {
+    const captured: unknown[] = [];
+    class FakeHands {
+      constructor(cfg: unknown) {
+        captured.push(cfg);
+      }
+    }
+    (window as unknown as Record<string, unknown>).Hands = FakeHands;
+
+    const { Hands } = await import("@mediapipe/hands");
+    const instance = new (Hands as new (cfg: unknown) => unknown)({
+      maxHands: 2,
+    });
+    expect(instance).toBeInstanceOf(FakeHands);
+    expect(captured).toEqual([{ maxHands: 2 }]);
+  });
+
+  it("HAND_CONNECTIONS forwards length + index reads to window.HAND_CONNECTIONS", async () => {
+    (window as unknown as Record<string, unknown>).HAND_CONNECTIONS = [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+    ];
+    const { HAND_CONNECTIONS } = await import("@mediapipe/hands");
+    expect(HAND_CONNECTIONS.length).toBe(3);
+    expect(HAND_CONNECTIONS[0]).toEqual([0, 1]);
+    expect(HAND_CONNECTIONS[2]).toEqual([2, 3]);
+  });
+
+  it("HAND_CONNECTIONS returns an empty-shape view when the global isn't loaded yet", async () => {
+    const { HAND_CONNECTIONS } = await import("@mediapipe/hands");
+    expect(HAND_CONNECTIONS.length).toBe(0);
   });
 });

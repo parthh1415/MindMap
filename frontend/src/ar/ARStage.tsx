@@ -28,45 +28,39 @@ import type { TrackedHand, RawHand } from "./types";
 import * as THREE from "three";
 import "./ARStage.css";
 
-// Mouse-input feel constants — kept inline because they're only used here.
-const MOUSE_ROTATE_SENSITIVITY = 0.005;   // radians per pixel of drag
-const MOUSE_ZOOM_SENSITIVITY = 0.005;     // camera-Z step per wheel-pixel
-const MOUSE_CLICK_DRAG_THRESHOLD = 4;     // px — beyond this, treat as drag not click
-
 interface Props {
   onExit: () => void;
 }
 
+/**
+ * Hands-only AR view per the reference spec:
+ *   - Opens webcam feed in real time
+ *   - Tracks hands via @mediapipe/hands (local assets, no TFHub fetch)
+ *   - Renders the live graph in a WebGL overlay
+ *   - Left hand pinch  = clutch → wrist Δ rotates yaw/pitch, depth Δ zooms
+ *   - Right hand pinch = pointer → index fingertip picks node, pinch toggles
+ *   - graph container has pointer-events: none — no mouse input
+ *
+ * If the camera can't start (cached deny, gesture-required, busy), the
+ * full stage becomes a tap-target: clicking anywhere re-attempts the
+ * permission flow. No "retry" button — the entire screen IS the button.
+ */
 export default function ARStage({ onExit }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("starting…");
-  const [inputMode, setInputMode] = useState<"camera" | "mouse">("mouse");
+  const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraTrying, setCameraTrying] = useState(false);
   const { fps, tick, latency } = useFps();
-
-  // Exposed by Effect 1 so the "Retry Camera" button can re-attempt
-  // without restarting the scene + RAF loop.
-  const retryCameraRef = useRef<(() => Promise<void>) | null>(null);
-
-  const handleRetryCamera = async () => {
-    if (cameraTrying) return;
-    setCameraTrying(true);
-    try {
-      await retryCameraRef.current?.();
-    } finally {
-      setCameraTrying(false);
-    }
-  };
 
   const nodes = useGraphStore(useShallow(selectNodeList));
   const edges = useGraphStore(useShallow(selectEdgeList));
   const activatedNodeIds = useGraphStore((s) => s.activatedNodeIds);
   const toggleActivated = useGraphStore((s) => s.toggleActivated);
 
-  // Refs so the RAF loop always reads the latest values without restarting
+  // Refs so the RAF loop reads the latest values without restarting
   const toggleActivatedRef = useRef(toggleActivated);
   useEffect(() => {
     toggleActivatedRef.current = toggleActivated;
@@ -77,17 +71,28 @@ export default function ARStage({ onExit }: Props) {
     activatedRef.current = activatedNodeIds;
   }, [activatedNodeIds]);
 
-  // Ref so Effect 2 can find the live scene built by Effect 1
   const sceneRef = useRef<SceneRefs | null>(null);
 
-  // Ref to keep tick stable — sync it without causing effect restarts
   const tickRef = useRef(tick);
   useEffect(() => {
     tickRef.current = tick;
   }, [tick]);
 
-  // Effect 1: Build scene + run RAF loop. Only restarts when graph topology changes.
-  // Webcam + hand-tracking are best-effort — failure falls back to mouse-only mode.
+  // Exposed by Effect 1; called from the fullscreen tap-target in JSX.
+  const retryCameraRef = useRef<(() => Promise<void>) | null>(null);
+
+  const handleTapToEnable = async () => {
+    if (cameraTrying || cameraReady) return;
+    setCameraTrying(true);
+    try {
+      await retryCameraRef.current?.();
+    } finally {
+      setCameraTrying(false);
+    }
+  };
+
+  // Effect 1: build scene, set up camera + hand tracking, run RAF loop.
+  // Restarts only when graph topology changes (nodes/edges).
   useEffect(() => {
     let raf = 0;
     let stream: MediaStream | null = null;
@@ -100,15 +105,6 @@ export default function ARStage({ onExit }: Props) {
     const current = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
     let highlightedId: string | null = null;
 
-    // Mouse-input state (always wired so users can navigate without a camera)
-    let mouseDown = false;
-    let mouseDragged = false;
-    let lastMouseX = 0;
-    let lastMouseY = 0;
-    let mouseDownX = 0;
-    let mouseDownY = 0;
-
-    // Optional hand-tracking handles (set if webcam + detector come up)
     let handTrackingReady = false;
     type Detector = Awaited<ReturnType<typeof initDetector>>;
     let detector: Detector | null = null;
@@ -117,9 +113,8 @@ export default function ARStage({ onExit }: Props) {
     const buildSceneFromStore = () => {
       const gc = graphContainerRef.current;
       if (!gc) return false;
-      // Defensive filter: drop edges whose endpoints aren't in the
-      // current node set. Otherwise d3-force-3d's forceLink throws
-      // "node not found: <id>" and the whole AR view dies.
+      // Defensive filter — drop edges whose endpoints aren't in the
+      // node set (otherwise d3-force-3d throws "node not found: <id>").
       const nodeIdSet = new Set(nodes.map((n) => n._id));
       const layoutNodes = nodes.map((n) => ({ _id: n._id, label: n.label }));
       const layoutEdges = edges
@@ -127,10 +122,10 @@ export default function ARStage({ onExit }: Props) {
           (e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id),
         )
         .map((e) => ({ source_id: e.source_id, target_id: e.target_id }));
-      const droppedEdgeCount = edges.length - layoutEdges.length;
-      if (droppedEdgeCount > 0) {
+      const dropped = edges.length - layoutEdges.length;
+      if (dropped > 0) {
         console.warn(
-          `[AR] dropped ${droppedEdgeCount} orphan edge(s) — endpoint id missing from nodes list`,
+          `[AR] dropped ${dropped} orphan edge(s) — endpoint id missing from nodes list`,
         );
       }
       const positions = computeLayout(layoutNodes, layoutEdges);
@@ -140,7 +135,6 @@ export default function ARStage({ onExit }: Props) {
     };
 
     const setupHandTracking = async (): Promise<void> => {
-      // Reset error state on each attempt so the user sees fresh feedback.
       setCameraError(null);
       try {
         const v = videoRef.current;
@@ -155,12 +149,13 @@ export default function ARStage({ onExit }: Props) {
         detector = await initDetector();
         overlayCtx = overlay.getContext("2d");
         handTrackingReady = true;
-        setInputMode("camera");
+        setCameraReady(true);
         setCameraError(null);
-        setStatus("tracking — pinch (left) to rotate/zoom, pinch (right) on a node to mark");
+        setStatus(
+          "tracking — left pinch rotates/zooms, right pinch on a node marks",
+        );
       } catch (err) {
         console.warn("[AR] camera unavailable:", err);
-        // Best-effort cleanup of any partially-acquired resources
         if (stream) {
           stream.getTracks().forEach((t) => t.stop());
           stream = null;
@@ -170,77 +165,13 @@ export default function ARStage({ onExit }: Props) {
         handTrackingReady = false;
         detector = null;
         overlayCtx = null;
-        setInputMode("mouse");
+        setCameraReady(false);
         setCameraError(describeCameraError(err));
-        setStatus("waiting for camera — meanwhile drag/scroll/click works");
+        setStatus("camera blocked — tap anywhere to enable hand tracking");
       }
     };
-
-    // Make setupHandTracking callable from outside the effect (Retry button).
     retryCameraRef.current = setupHandTracking;
 
-    // ── Mouse handlers (attached to the graph container after scene mounts) ──
-    const onMouseDown = (e: MouseEvent) => {
-      mouseDown = true;
-      mouseDragged = false;
-      lastMouseX = mouseDownX = e.clientX;
-      lastMouseY = mouseDownY = e.clientY;
-    };
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!mouseDown) return;
-      const dx = e.clientX - lastMouseX;
-      const dy = e.clientY - lastMouseY;
-      lastMouseX = e.clientX;
-      lastMouseY = e.clientY;
-      target.yaw += dx * MOUSE_ROTATE_SENSITIVITY;
-      target.pitch += dy * MOUSE_ROTATE_SENSITIVITY;
-      // Beyond a small threshold, suppress the click-to-activate so a
-      // drag doesn't accidentally toggle a node when the cursor lifts.
-      if (
-        Math.abs(e.clientX - mouseDownX) > MOUSE_CLICK_DRAG_THRESHOLD ||
-        Math.abs(e.clientY - mouseDownY) > MOUSE_CLICK_DRAG_THRESHOLD
-      ) {
-        mouseDragged = true;
-      }
-    };
-
-    const onMouseUp = (e: MouseEvent) => {
-      if (!mouseDown) return;
-      mouseDown = false;
-      // Click-to-toggle only when the user didn't drag
-      if (mouseDragged || !scene) return;
-      const target_el = e.currentTarget as HTMLElement;
-      const rect = target_el.getBoundingClientRect();
-      const fx = e.clientX - rect.left;
-      const fy = e.clientY - rect.top;
-      let bestId: string | null = null;
-      let bestD = POINTER_PICK_RADIUS_PX;
-      scene.nodeMeshes.forEach((mesh, id) => {
-        const p = projectNodeToScreen(mesh, scene!.camera, rect.width, rect.height);
-        const d = Math.hypot(p.x - fx, p.y - fy);
-        if (d < bestD) {
-          bestD = d;
-          bestId = id;
-        }
-      });
-      if (bestId) toggleActivatedRef.current(bestId);
-    };
-
-    const onMouseLeave = () => {
-      mouseDown = false;
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const dz = e.deltaY * MOUSE_ZOOM_SENSITIVITY;
-      target.camZ = Math.min(
-        CAMERA_Z_MAX,
-        Math.max(CAMERA_Z_MIN, target.camZ + dz),
-      );
-    };
-
-    // ── Boot sequence ──
     (async () => {
       if (cancelled) return;
       if (nodes.length === 0) {
@@ -251,28 +182,21 @@ export default function ARStage({ onExit }: Props) {
         setStatus("error: graph container missing");
         return;
       }
-      // Scene is up; render starts immediately. Webcam is best-effort.
       setStatus("rendering — requesting camera…");
 
-      // Wire mouse handlers to the graph container (and only the container,
-      // so clicks on the HUD/exit button still hit those buttons).
-      const gc = graphContainerRef.current;
-      if (gc) {
-        gc.addEventListener("mousedown", onMouseDown);
-        gc.addEventListener("mousemove", onMouseMove);
-        gc.addEventListener("mouseup", onMouseUp);
-        gc.addEventListener("mouseleave", onMouseLeave);
-        gc.addEventListener("wheel", onWheel, { passive: false });
-      }
-
-      // Start the render+animation loop BEFORE webcam, so the user sees
-      // the graph immediately while permission UI is up.
+      // Render loop runs unconditionally so the user always sees the
+      // graph spinning slowly at the smoothed pose. Hand-tracking
+      // augments it when the camera is up.
       const loop = async () => {
         if (cancelled) return;
         const t0 = performance.now();
 
-        // Hand-tracking branch — only runs when camera + detector are live.
-        if (handTrackingReady && detector && videoRef.current && overlayRef.current) {
+        if (
+          handTrackingReady &&
+          detector &&
+          videoRef.current &&
+          overlayRef.current
+        ) {
           const v = videoRef.current;
           const overlay = overlayRef.current;
           try {
@@ -300,7 +224,6 @@ export default function ARStage({ onExit }: Props) {
               );
             }
 
-            // Pointer picking via fingertip
             if (scene && frame.pointerScreen) {
               const w = overlay.width;
               const h = overlay.height;
@@ -324,7 +247,9 @@ export default function ARStage({ onExit }: Props) {
                   if (prev)
                     setNodeColor(
                       prev,
-                      activatedRef.current.has(highlightedId) ? "active" : "base",
+                      activatedRef.current.has(highlightedId)
+                        ? "active"
+                        : "base",
                     );
                 }
                 if (bestId) {
@@ -339,14 +264,14 @@ export default function ARStage({ onExit }: Props) {
               toggleActivatedRef.current(highlightedId);
             }
 
-            if (overlayCtx) drawHands(overlayCtx, tracks, overlay.width, overlay.height);
+            if (overlayCtx)
+              drawHands(overlayCtx, tracks, overlay.width, overlay.height);
           } catch (err) {
-            // Don't kill the render loop just because one inference frame failed.
             console.warn("[AR] hand-track frame error:", err);
           }
         }
 
-        // Pose smoothing always runs (driven by mouse OR gestures)
+        // Pose smoothing (driven only by gestures — no mouse input)
         current.yaw += (target.yaw - current.yaw) * ROTATION_DAMPING;
         current.pitch += (target.pitch - current.pitch) * ROTATION_DAMPING;
         current.camZ += (target.camZ - current.camZ) * ZOOM_CAMERA_DAMPING;
@@ -364,21 +289,14 @@ export default function ARStage({ onExit }: Props) {
       };
       loop();
 
-      // Now try the camera in parallel — failure is non-fatal.
+      // Try the camera in parallel — if it fails, the JSX shows the
+      // tap-anywhere overlay that calls retryCameraRef on click.
       await setupHandTracking();
     })();
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
-      const gc = graphContainerRef.current;
-      if (gc) {
-        gc.removeEventListener("mousedown", onMouseDown);
-        gc.removeEventListener("mousemove", onMouseMove);
-        gc.removeEventListener("mouseup", onMouseUp);
-        gc.removeEventListener("mouseleave", onMouseLeave);
-        gc.removeEventListener("wheel", onWheel);
-      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
       if (videoRef.current) stopWebcam(stream, videoRef.current);
       void disposeDetector();
@@ -388,7 +306,7 @@ export default function ARStage({ onExit }: Props) {
     };
   }, [nodes, edges]);
 
-  // Effect 2: Repaint node colors when activatedNodeIds changes — no scene rebuild.
+  // Effect 2: repaint node colors when activatedNodeIds changes.
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
@@ -398,7 +316,7 @@ export default function ARStage({ onExit }: Props) {
   }, [activatedNodeIds]);
 
   return (
-    <div className="ar-stage" data-input-mode={inputMode}>
+    <div className="ar-stage">
       <video ref={videoRef} playsInline muted />
       <div ref={graphContainerRef} className="ar-graph" />
       <canvas ref={overlayRef} className="ar-overlay" />
@@ -409,29 +327,26 @@ export default function ARStage({ onExit }: Props) {
         <span>nodes {nodes.length}</span>
         <span>active {activatedNodeIds.size}</span>
       </div>
-      {inputMode === "mouse" ? (
-        <div className="ar-camera-banner" role="status">
-          {cameraError ? (
-            <p className="ar-camera-error">{cameraError}</p>
-          ) : (
-            <p className="ar-camera-hint">
-              Click below to enable hand-tracking with your camera. Two-hand
-              gestures: pinch left to rotate/zoom, pinch right on a node to mark.
-            </p>
-          )}
-          <button
-            type="button"
-            className="ar-camera-retry"
-            onClick={handleRetryCamera}
-            disabled={cameraTrying}
-          >
-            {cameraTrying
-              ? "Trying camera…"
-              : cameraError
-                ? "Retry Camera"
-                : "Enable Camera"}
-          </button>
-        </div>
+      {!cameraReady ? (
+        <button
+          type="button"
+          className="ar-tap-target"
+          onClick={handleTapToEnable}
+          disabled={cameraTrying}
+          aria-label="Tap anywhere to enable camera and hand tracking"
+        >
+          <div className="ar-tap-card">
+            <h2>{cameraTrying ? "Connecting camera…" : "Tap to enable hand tracking"}</h2>
+            {cameraError ? (
+              <p className="ar-tap-error">{cameraError}</p>
+            ) : (
+              <p>
+                Two-hand gestures: <strong>left pinch</strong> rotates &amp; zooms,
+                <strong> right pinch</strong> on a node toggles activation.
+              </p>
+            )}
+          </div>
+        </button>
       ) : null}
       <button className="ar-exit" onClick={onExit}>Exit AR</button>
     </div>

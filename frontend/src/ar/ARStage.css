@@ -19,24 +19,13 @@
 .ar-stage .ar-graph {
   position: absolute;
   inset: 0;
-  /* Receive mouse events so drag-rotate / wheel-zoom / click-activate
-     work as a fallback when the camera is unavailable AND alongside
-     hand-tracking when it is. The HUD + Exit button live on a higher
-     z-index and accept pointer events themselves, so they still work. */
-  pointer-events: auto;
-  cursor: grab;
-}
-
-.ar-stage .ar-graph:active {
-  cursor: grabbing;
-}
-
-.ar-stage[data-input-mode="camera"] .ar-graph {
-  cursor: default;
+  /* Per the reference spec: gestures come from hand-tracking only.
+     No mouse interactions on the graph. */
+  pointer-events: none;
 }
 
 .ar-stage .ar-overlay {
-  /* Overlay is a hand-skeleton draw layer; never accepts mouse. */
+  /* Hand-skeleton draw layer. Never accepts mouse. */
   pointer-events: none;
 }
 
@@ -70,55 +59,56 @@
   cursor: pointer;
 }
 
-/* Centered banner shown only in mouse mode — invites the user to enable
-   the camera (or surfaces the error from the most recent attempt). */
-.ar-stage .ar-camera-banner {
+/* Fullscreen tap-target shown only before the camera is granted.
+   Browsers (especially Safari) require a user gesture for getUserMedia
+   in many states (cached deny, page-load timing, OS prompt). The whole
+   screen is the gesture — no tiny "Retry" button to hunt for. */
+.ar-stage .ar-tap-target {
   position: absolute;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  max-width: 480px;
-  padding: 16px 20px;
-  background: rgba(6, 9, 13, 0.85);
-  border: 1px solid rgba(214, 255, 58, 0.35);
-  border-radius: 10px;
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: center;
-  text-align: center;
-  font-family: "DM Sans", system-ui, sans-serif;
-}
-.ar-stage .ar-camera-banner p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #e6edf3;
-}
-.ar-stage .ar-camera-error {
-  color: #ffae3d;
-}
-.ar-stage .ar-camera-hint {
-  color: #d6ff3a;
-}
-.ar-stage .ar-camera-retry {
-  background: #d6ff3a;
-  color: #06090d;
+  inset: 0;
+  z-index: 20;
+  background: rgba(6, 9, 13, 0.55);
+  backdrop-filter: blur(4px);
   border: none;
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-family: "Space Grotesk", system-ui, sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font: inherit;
+  color: inherit;
 }
-.ar-stage .ar-camera-retry:disabled {
-  background: rgba(214, 255, 58, 0.4);
+.ar-stage .ar-tap-target:disabled {
   cursor: wait;
 }
-.ar-stage .ar-camera-retry:hover:not(:disabled) {
-  background: #c4ed28;
+.ar-stage .ar-tap-card {
+  max-width: 480px;
+  padding: 28px 32px;
+  background: rgba(6, 9, 13, 0.92);
+  border: 1px solid rgba(214, 255, 58, 0.45);
+  border-radius: 14px;
+  text-align: center;
+  font-family: "DM Sans", system-ui, sans-serif;
+  pointer-events: none; /* clicks pass through to the parent button */
+}
+.ar-stage .ar-tap-card h2 {
+  margin: 0 0 12px;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: #d6ff3a;
+}
+.ar-stage .ar-tap-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #e6edf3;
+}
+.ar-stage .ar-tap-card strong {
+  color: #d6ff3a;
+  font-weight: 600;
+}
+.ar-stage .ar-tap-card .ar-tap-error {
+  color: #ffae3d;
 }
