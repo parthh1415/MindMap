@@ -103,6 +103,89 @@ describe("gestureController — two-hand pointer + control", () => {
   });
 });
 
+describe("gestureController — two-handed pinch-spread zoom", () => {
+  let g: ReturnType<typeof createGestureController>;
+  beforeEach(() => { g = createGestureController(); });
+
+  it("emits zoomDelta when both hands pinch and move APART (zoom IN — negative dZ)", () => {
+    // Frame 1: both hands pinching, distance baseline.
+    g.update([
+      mkHand("L", null, 100, 100, 0, true),
+      mkHand("R", null, 200, 100, 0, true),
+    ]);
+    // Frame 2: hands moved apart — L moves left, R moves right.
+    const f = g.update([
+      mkHand("L", null, 80, 100, 0, true),
+      mkHand("R", null, 220, 100, 0, true),
+    ]);
+    expect(f.zoomDelta).not.toBeNull();
+    // Hands moving apart → zoom IN → camera Z DECREASES → negative delta.
+    expect(f.zoomDelta!).toBeLessThan(0);
+  });
+
+  it("emits positive zoomDelta when both hands pinch and move TOGETHER (zoom OUT)", () => {
+    g.update([
+      mkHand("L", null, 80, 100, 0, true),
+      mkHand("R", null, 220, 100, 0, true),
+    ]);
+    const f = g.update([
+      mkHand("L", null, 100, 100, 0, true),
+      mkHand("R", null, 200, 100, 0, true),
+    ]);
+    expect(f.zoomDelta).not.toBeNull();
+    expect(f.zoomDelta!).toBeGreaterThan(0);
+  });
+
+  it("ignores tiny distance jitter below the pinch-zoom threshold", () => {
+    g.update([
+      mkHand("L", null, 100, 100, 0, true),
+      mkHand("R", null, 200, 100, 0, true),
+    ]);
+    // Sub-pixel jitter — way below ZOOM_PINCH_THRESHOLD (1.5px).
+    const f = g.update([
+      mkHand("L", null, 100.3, 100, 0, true),
+      mkHand("R", null, 200.2, 100, 0, true),
+    ]);
+    expect(f.zoomDelta).toBeNull();
+  });
+
+  it("suppresses rotation while both hands are pinching", () => {
+    g.update([
+      mkHand("L", null, 100, 100, 0, true),
+      mkHand("R", null, 200, 100, 0, true),
+    ]);
+    // Both hands move horizontally (would rotate yaw under single-hand
+    // semantics) but we're in two-hand zoom mode, so no rotateDelta.
+    const f = g.update([
+      mkHand("L", null, 130, 100, 0, true),
+      mkHand("R", null, 230, 100, 0, true),
+    ]);
+    expect(f.rotateDelta).toBeNull();
+  });
+
+  it("resets zoom baseline when a hand stops pinching (no spurious delta)", () => {
+    // Frame 1: both pinching, far apart.
+    g.update([
+      mkHand("L", null, 50, 100, 0, true),
+      mkHand("R", null, 250, 100, 0, true),
+    ]);
+    // Frame 2: only L still pinched (back to single-hand mode).
+    g.update([
+      mkHand("L", null, 50, 100, 0, true),
+      mkHand("R", null, 250, 100, 0, false),
+    ]);
+    // Frame 3: both pinching again at a NEW distance — must NOT
+    // compare against the stale 200-px frame-1 baseline.
+    const f = g.update([
+      mkHand("L", null, 60, 100, 0, true),
+      mkHand("R", null, 240, 100, 0, true),
+    ]);
+    // First frame back in two-hand mode → no zoom delta yet (just
+    // re-established baseline).
+    expect(f.zoomDelta).toBeNull();
+  });
+});
+
 describe("gestureController — ctrl swap mid-session", () => {
   let g: ReturnType<typeof createGestureController>;
   beforeEach(() => { g = createGestureController(); });
