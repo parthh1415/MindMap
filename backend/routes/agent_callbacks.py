@@ -32,9 +32,13 @@ from backend.ws.graph_socket import (
 router = APIRouter(tags=["agent-callbacks"])
 
 
-# Per-session lower/stripped labels we've already broadcast as partials.
-# Cleared once the matching ``/internal/topology-diff`` settles.
-_partial_broadcast: dict[str, set[str]] = {}
+# Per-session map of lower/stripped label → assigned _id for nodes we've
+# already broadcast as partials. The id is needed so the matching
+# ``/internal/topology-diff`` can resolve edges that reference these
+# nodes by label. Cleared once the diff settles.
+# (Phase 13: was previously dict[str, set[str]] — labels only — which
+# caused edges spanning partial+final nodes to persist with source_id=None.)
+_partial_broadcast: dict[str, dict[str, str]] = {}
 _partial_lock = asyncio.Lock()
 
 
@@ -80,12 +84,13 @@ async def post_topology_partial_node(
         raise HTTPException(400, "node.label is required")
 
     async with _partial_lock:
-        seen = _partial_broadcast.setdefault(body.session_id, set())
+        seen = _partial_broadcast.setdefault(body.session_id, {})
         if label_norm in seen:
-            return {"ok": True, "duplicate": True}
+            return {"ok": True, "duplicate": True, "node_id": seen[label_norm]}
         # Reserve the label up front so concurrent posts (e.g. retried
-        # network requests) don't both create.
-        seen.add(label_norm)
+        # network requests) don't both create. Use a sentinel until we
+        # have the assigned _id.
+        seen[label_norm] = ""  # reservation placeholder
 
     now = datetime.now(timezone.utc)
     node = dict(body.node)
@@ -102,8 +107,13 @@ async def post_topology_partial_node(
         # On persistence failure, release the reservation so a later retry
         # can try again.
         async with _partial_lock:
-            _partial_broadcast.get(body.session_id, set()).discard(label_norm)
+            _partial_broadcast.get(body.session_id, {}).pop(label_norm, None)
         raise
+
+    # Record the real _id so the eventual /internal/topology-diff can
+    # resolve label-referenced edges that point at this node.
+    async with _partial_lock:
+        _partial_broadcast.setdefault(body.session_id, {})[label_norm] = created["_id"]
 
     await broadcast_node_upsert(body.session_id, created, resolves_ghost_id=ghost_id)
     return {"ok": True, "node_id": created.get("_id")}
@@ -113,11 +123,14 @@ async def post_topology_partial_node(
 async def post_topology_diff(
     body: TopologyDiffBody, db: AsyncIOMotorDatabase = Depends(get_db)
 ):
-    # Snapshot + clear the per-session partial-broadcast set so this diff
+    # Snapshot + clear the per-session partial-broadcast map so this diff
     # acts as the "settle" — anything not yet broadcast becomes broadcast,
-    # then the set resets for the next user utterance.
+    # then the map resets for the next user utterance.
     async with _partial_lock:
-        seen = _partial_broadcast.pop(body.session_id, set())
+        seen_map = _partial_broadcast.pop(body.session_id, {})
+    # Drop reservation placeholders (label_norm with empty _id — created
+    # node failed mid-flight). Defensive.
+    seen_map = {k: v for k, v in seen_map.items() if v}
 
     await apply_topology_diff(
         db,
@@ -126,7 +139,7 @@ async def post_topology_diff(
         additions_edges=body.additions_edges,
         merges=body.merges,
         edge_updates=body.edge_updates,
-        dedupe_labels=seen,
+        dedupe_label_id_map=seen_map,
     )
     return {"ok": True}
 

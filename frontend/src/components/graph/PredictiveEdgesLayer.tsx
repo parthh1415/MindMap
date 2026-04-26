@@ -88,25 +88,29 @@ export function PredictiveEdgesLayer({ positions }: Props) {
             key={edge.id}
             d={d}
             stroke={color}
-            strokeWidth={0.8}
-            strokeDasharray="3 5"
+            strokeWidth={1.4}
+            strokeDasharray="5 4"
             fill="none"
             strokeLinecap="round"
+            // brighter + thicker than the original 0.8/0.55 — these are
+            // the "the system thinks these are connected" hints the user
+            // needs to actually see during real-time speech.
             initial={{ opacity: 0 }}
             animate={
               reduce
-                ? { opacity: 0.4 }
-                : { opacity: [0, 0.55, 0.55, 0] }
+                ? { opacity: 0.6 }
+                : { opacity: [0, 0.78, 0.78, 0] }
             }
             transition={
               reduce
                 ? { duration: 0 }
                 : {
                     duration: 12,
-                    times: [0, 0.12, 0.85, 1],
+                    times: [0, 0.08, 0.85, 1],
                     ease: "easeInOut",
                   }
             }
+            style={{ filter: `drop-shadow(0 0 3px ${color})` }}
           />
         ))}
       </g>

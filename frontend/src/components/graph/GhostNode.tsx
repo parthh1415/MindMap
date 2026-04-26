@@ -17,24 +17,23 @@ export function GhostNode(props: NodeProps<GhostNodeData>) {
   const reduce = useReducedMotion();
 
   return (
-    <div className="orb-wrap orb-wrap--ghost">
+    <div className="orb-wrap orb-wrap--ghost" style={{ ["--gs" as string]: speakerColor }}>
       <motion.div
         layoutId={ghost_id}
         initial={reduce ? false : { opacity: 0, scale: 0 }}
         animate={
           reduce
-            ? { opacity: 0.7, scale: 1 }
-            : { opacity: [0.45, 0.85, 0.45], scale: [0.95, 1.04, 0.95] }
+            ? { opacity: 0.85, scale: 1 }
+            // Mount: pop to 1.25x with full opacity (so user notices appearance),
+            // then settle to a slow breath between 0.7-1.0 opacity.
+            : { opacity: [0, 1, 0.78, 0.95, 0.78], scale: [0, 1.25, 1, 1, 1] }
         }
         transition={
           reduce
             ? { duration: 0 }
-            : { duration: 1.6, repeat: Infinity, ease: "easeInOut" }
+            : { duration: 2.2, ease: "easeOut", times: [0, 0.18, 0.36, 0.7, 1] }
         }
         className="ghost-orb"
-        style={{
-          borderColor: `color-mix(in srgb, ${speakerColor} 75%, transparent)`,
-        }}
         aria-label={`Possible concept: ${label}`}
         data-ghost-id={ghost_id}
       />
@@ -51,23 +50,33 @@ export function GhostNode(props: NodeProps<GhostNodeData>) {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 6px;
+          gap: 7px;
           transform: translate(-50%, -50%);
-          padding-bottom: 18px;
+          padding-bottom: 22px;
         }
         .ghost-orb {
-          width: 14px;
-          height: 14px;
+          /* Bigger + brighter than the original Obsidian-pure 14px dashed
+           * outline: real-speech ghosts need to be *seen* during a 2-3
+           * second window so the user notices them appear before the
+           * topology agent commits a real node. */
+          width: 22px;
+          height: 22px;
           border-radius: 999px;
-          border: 1.4px dashed;
-          background: transparent;
+          border: 1.5px dashed var(--gs);
+          background:
+            radial-gradient(circle at 35% 35%,
+              color-mix(in srgb, var(--gs) 32%, transparent) 0%,
+              color-mix(in srgb, var(--gs) 12%, transparent) 70%,
+              transparent 100%);
+          box-shadow: 0 0 12px color-mix(in srgb, var(--gs) 35%, transparent);
           flex-shrink: 0;
         }
         .ghost-orb-label {
           font-family: var(--font-body);
-          font-size: 10.5px;
+          font-size: 11.5px;
+          font-weight: 500;
           font-style: italic;
-          color: var(--text-tertiary);
+          color: color-mix(in srgb, var(--gs) 65%, var(--text-secondary));
           letter-spacing: -0.005em;
           line-height: 1.15;
           text-align: center;
@@ -77,7 +86,7 @@ export function GhostNode(props: NodeProps<GhostNodeData>) {
           text-overflow: ellipsis;
           pointer-events: none;
           user-select: none;
-          text-shadow: 0 1px 4px rgba(0,0,0,0.85);
+          text-shadow: 0 1px 4px rgba(0,0,0,0.92);
         }
         .rf-handle-ghost {
           width: 1px;

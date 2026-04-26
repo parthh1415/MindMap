@@ -182,6 +182,7 @@ async def apply_topology_diff(
     merges: list[dict],
     edge_updates: list[dict],
     dedupe_labels: Optional[set[str]] = None,
+    dedupe_label_id_map: Optional[dict[str, str]] = None,
 ) -> None:
     """Persist topology diff and broadcast to subscribers.
 
@@ -189,16 +190,32 @@ async def apply_topology_diff(
     topology agent — we strip it before persistence and pass it through as
     ``resolves_ghost_id`` on the broadcast event.
 
-    When ``dedupe_labels`` is supplied (a set of lower/stripped label
-    strings), any addition node whose label matches an entry will be
-    skipped — both persistence and broadcast — on the assumption that the
-    partial-node streaming endpoint already created+broadcast it.
+    Dedupe semantics (Phase 13 fix):
+      - ``dedupe_labels`` (legacy): a set of lower/stripped labels already
+        broadcast via the partial-node endpoint. Any addition node whose
+        label matches is skipped here.
+      - ``dedupe_label_id_map`` (new): a richer mapping ``label_norm -> _id``
+        sourced from the partial-broadcast tracker. Used to seed
+        ``label_to_id`` so EDGES that reference partial-broadcast nodes
+        by label can still resolve to the correct ``_id``. Without this,
+        edges spanning partial+final nodes were persisting with
+        ``source_id=None`` because dedupe skipped the node entry that
+        would have populated ``label_to_id``.
     """
     now = datetime.now(timezone.utc)
 
+    # Resolve dedupe_labels from the richer map if supplied.
+    if dedupe_label_id_map is not None and dedupe_labels is None:
+        dedupe_labels = set(dedupe_label_id_map.keys())
+
     # Map labels of newly created nodes back to their assigned _id so the
     # additions_edges (which may reference labels) can be resolved.
+    # SEED with the partial-broadcast mapping so edges that point at
+    # already-broadcast partial nodes can still resolve.
     label_to_id: dict[str, str] = {}
+    if dedupe_label_id_map:
+        for label_norm, _id in dedupe_label_id_map.items():
+            label_to_id[label_norm] = _id
 
     for raw in additions_nodes:
         node = dict(raw)
@@ -214,16 +231,47 @@ async def apply_topology_diff(
         node.setdefault("importance_score", 1.0)
         created = await nodes_repo.create_node(db, node)
         if "label" in created:
+            # Index by both the literal label and the normalized label so
+            # edges referencing either form resolve correctly.
             label_to_id[created["label"]] = created["_id"]
+            label_to_id[str(created["label"]).lower().strip()] = created["_id"]
         await broadcast_node_upsert(session_id, created, resolves_ghost_id=ghost_id)
 
     for raw in additions_edges:
         edge = dict(raw)
         edge["session_id"] = session_id
-        # Allow the agent to reference newly created nodes by label.
+        # The topology system prompt tells the LLM to emit edges with
+        # ``source_label_or_id`` / ``target_label_or_id`` keys. Earlier
+        # code only read ``source_id`` / ``target_id``, which silently
+        # turned every emitted edge into ``source_id=None`` (and the
+        # frontend failed to render any of them). Accept BOTH keys.
+        for canonical, alts in (
+            ("source_id", ("source_label_or_id", "source", "source_label")),
+            ("target_id", ("target_label_or_id", "target", "target_label")),
+        ):
+            if not edge.get(canonical):
+                for alt in alts:
+                    if edge.get(alt):
+                        edge[canonical] = edge[alt]
+                        break
+        # Resolve label references → real ids (literal label first,
+        # then normalized).
         for ref_field in ("source_id", "target_id"):
-            if edge.get(ref_field) in label_to_id:
-                edge[ref_field] = label_to_id[edge[ref_field]]
+            ref = edge.get(ref_field)
+            if isinstance(ref, str):
+                if ref in label_to_id:
+                    edge[ref_field] = label_to_id[ref]
+                else:
+                    norm = ref.lower().strip()
+                    if norm in label_to_id:
+                        edge[ref_field] = label_to_id[norm]
+        # Skip edges we couldn't resolve (don't persist garbage).
+        if not edge.get("source_id") or not edge.get("target_id"):
+            logger.warning(
+                "skipping edge with unresolved endpoints: src=%r tgt=%r",
+                edge.get("source_id"), edge.get("target_id"),
+            )
+            continue
         edge.setdefault("created_at", now)
         edge.setdefault("edge_type", "solid")
         created_edge = await edges_repo.create_edge(db, edge)
