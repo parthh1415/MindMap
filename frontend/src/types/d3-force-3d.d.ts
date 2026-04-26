@@ -21,6 +21,7 @@ declare module "d3-force-3d" {
     index?: number;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   export interface Force<N extends SimulationNodeDatum, L> {
     (alpha: number): void;
     initialize?(nodes: N[]): void;
