@@ -5,7 +5,7 @@ export type Role = "control" | "pointer";
 export interface Vec2 { x: number; y: number; }
 export interface Vec3 { x: number; y: number; z: number; }
 
-export interface Landmark extends Vec3 {}
+export type Landmark = Vec3;
 
 export interface RawHand {
   handedness: "Left" | "Right";

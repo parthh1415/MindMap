@@ -202,6 +202,7 @@ export default function ARStage({ onExit }: Props) {
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       if (videoRef.current) stopWebcam(stream, videoRef.current);
       void disposeDetector();
       if (scene) disposeScene(scene);

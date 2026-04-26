@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from "react";
 export function useFps(): { fps: number; tick: (latencyMs: number) => void; latency: number } {
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
-  const lastTimeRef = useRef(performance.now());
+  const lastTimeRef = useRef<number>(0);
   const framesRef = useRef(0);
   const lastLatencyRef = useRef(0);
 
   useEffect(() => {
+    lastTimeRef.current = performance.now();
     const id = setInterval(() => {
       const now = performance.now();
       const dt = now - lastTimeRef.current;
