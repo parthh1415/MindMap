@@ -260,7 +260,13 @@ export default function ARStage({ onExit }: Props) {
     // Defensive filter — drop edges whose endpoints aren't in the
     // node set (otherwise d3-force-3d throws "node not found: <id>").
     const nodeIdSet = new Set(nodes.map((n) => n._id));
-    const layoutNodes = nodes.map((n) => ({ _id: n._id, label: n.label }));
+    const layoutNodes = nodes.map((n) => ({
+      _id: n._id,
+      label: n.label,
+      // importance_score from the topology agent — drives orb size.
+      // Defaults to 0.5 (mid-tier) if the agent didn't set one.
+      importance: n.importance_score ?? 0.5,
+    }));
     const layoutEdges = edges
       .filter((e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id))
       .map((e) => ({ source_id: e.source_id, target_id: e.target_id }));
