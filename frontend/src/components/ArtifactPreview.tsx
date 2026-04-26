@@ -1,5 +1,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Copy, Download, ExternalLink, PenSquare, X } from "lucide-react";
+import {
+  Bookmark,
+  BookmarkCheck,
+  Copy,
+  Download,
+  ExternalLink,
+  PenSquare,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useArtifactStore, type ArtifactType } from "@/state/artifactStore";
 import { renderMarkdown } from "@/lib/markdownRender";
@@ -37,6 +45,16 @@ export function ArtifactPreview() {
   const artifact = useArtifactStore((s) => s.activeArtifact);
   const enterEditor = useArtifactStore((s) => s.enterEditor);
   const dismiss = useArtifactStore((s) => s.dismiss);
+  const toggleSaveActive = useArtifactStore((s) => s.toggleSaveActive);
+  // Local "just saved" flash so the click feels confirmed even before
+  // the network round-trip completes (the action is already optimistic
+  // on the store side).
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = window.setTimeout(() => setJustSaved(false), 1500);
+    return () => window.clearTimeout(t);
+  }, [justSaved]);
 
   const visible = phase === "ready" && !!artifact;
 
@@ -164,6 +182,37 @@ export function ArtifactPreview() {
             </header>
 
             <div className="art-preview__toolbar" role="toolbar">
+              <button
+                type="button"
+                className={`art-preview__tool art-preview__tool--save${
+                  artifact.pinned ? " is-saved" : ""
+                }${justSaved ? " just-saved" : ""}`}
+                onClick={() => {
+                  // Only flash "Saved!" when transitioning OFF→ON. The
+                  // action itself toggles either way (pinned ↔ unpinned).
+                  if (!artifact.pinned) setJustSaved(true);
+                  void toggleSaveActive();
+                }}
+                disabled={!artifact._id}
+                aria-pressed={!!artifact.pinned}
+                data-testid="artifact-save"
+                title={
+                  artifact.pinned
+                    ? "Saved — click to unpin"
+                    : "Save to your artifacts"
+                }
+              >
+                {artifact.pinned ? (
+                  <BookmarkCheck size={12} />
+                ) : (
+                  <Bookmark size={12} />
+                )}
+                {justSaved
+                  ? "Saved!"
+                  : artifact.pinned
+                    ? "Saved"
+                    : "Save"}
+              </button>
               <button
                 type="button"
                 className="art-preview__tool"
@@ -338,6 +387,41 @@ export function ArtifactPreview() {
               .art-preview__tool:hover {
                 color: var(--text-primary);
                 border-color: var(--border-default);
+              }
+              .art-preview__tool[disabled] {
+                opacity: 0.45;
+                cursor: not-allowed;
+              }
+              /* Save = primary action of this toolbar. Volt-yellow tint
+                 to read as the primary CTA; "is-saved" deepens the tint
+                 + swaps to a filled glyph; "just-saved" flashes a 1.5s
+                 success pulse to confirm the click without a toast. */
+              .art-preview__tool--save {
+                background: var(--signature-accent-soft);
+                border-color: rgba(214, 255, 58, 0.42);
+                color: var(--signature-accent);
+                font-weight: 600;
+              }
+              .art-preview__tool--save:hover {
+                background: rgba(214, 255, 58, 0.18);
+                color: var(--signature-accent);
+                border-color: var(--signature-accent);
+              }
+              .art-preview__tool--save.is-saved {
+                background: rgba(214, 255, 58, 0.22);
+                border-color: var(--signature-accent);
+                color: var(--signature-accent-strong);
+              }
+              .art-preview__tool--save.just-saved {
+                animation: art-save-flash 800ms ease-out;
+              }
+              @keyframes art-save-flash {
+                0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(214, 255, 58, 0.55); }
+                40%  { transform: scale(1.06); box-shadow: 0 0 0 6px rgba(214, 255, 58, 0); }
+                100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(214, 255, 58, 0); }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                .art-preview__tool--save.just-saved { animation: none; }
               }
               .art-preview__tabs {
                 display: flex;
