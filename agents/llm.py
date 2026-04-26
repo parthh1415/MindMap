@@ -284,21 +284,53 @@ async def _stream_to_json(provider: LLMProvider, prompt: str, system: str) -> di
 
 
 def _build_topology_provider() -> LLMProvider:
-    """Primary LLM picker. Prefers OpenAI when its key is present (user
-    flipped this in Phase 12); otherwise falls back to Groq."""
+    """Primary LLM picker for the topology agent.
+
+    Prefers Groq (Llama 3.3 70B): ~5-10× faster TTFT and tokens/sec
+    than gpt-4.1-mini, free at dev-tier rate limits, and quality is
+    competitive for the structured-JSON-diff task topology does. The
+    speed difference is the main win — orbs land in ~1-2s instead of
+    5-15s.
+
+    OpenAI is the fallback when Groq is unavailable or rate-limited
+    (preserves the artifact agent's $-budget for what it's actually
+    needed for: long-form document generation).
+
+    Override with TOPOLOGY_PRIMARY=openai env to flip back if a Groq
+    quality regression ever surfaces.
+    """
+    primary_pref = os.getenv("TOPOLOGY_PRIMARY", "groq").lower()
+    if primary_pref == "openai" and os.getenv("OPENAI_API_KEY"):
+        return OpenAIProvider()
+    if os.getenv("GROQ_API_KEY"):
+        return GroqProvider()
     if os.getenv("OPENAI_API_KEY"):
         return OpenAIProvider()
+    # Last resort: GroqProvider() will raise on missing key — let that
+    # surface so we don't silently produce bad diffs from a no-op.
     return GroqProvider()
 
 
 def _build_fallback_provider_chain() -> list["LLMProvider"]:
     """Ordered fallback chain used when the primary provider hits a rate
     limit. Returns the providers we should try, in order, *excluding*
-    the primary."""
+    the primary.
+
+    Primary = Groq → fallback to OpenAI then Gemini.
+    Primary = OpenAI → fallback to Groq then Gemini.
+    """
     chain: list[LLMProvider] = []
-    primary_is_openai = bool(os.getenv("OPENAI_API_KEY"))
-    # If primary is OpenAI, fall back to Groq next (still fast), then Gemini.
-    if primary_is_openai:
+    primary_pref = os.getenv("TOPOLOGY_PRIMARY", "groq").lower()
+    primary_is_groq = primary_pref != "openai" and bool(os.getenv("GROQ_API_KEY"))
+    if primary_is_groq:
+        # Groq primary — fall back to OpenAI next (slower but reliable).
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                chain.append(OpenAIProvider())
+            except Exception:  # noqa: BLE001
+                pass
+    else:
+        # OpenAI primary (or override) — fall back to Groq.
         if os.getenv("GROQ_API_KEY"):
             try:
                 chain.append(GroqProvider())
