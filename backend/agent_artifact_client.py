@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _pending: dict[str, asyncio.Future] = {}
 _pending_lock = asyncio.Lock()
 
-DEFAULT_TIMEOUT_SECONDS = 25.0
+DEFAULT_TIMEOUT_SECONDS = 45.0  # see backend/agent_synth_client.py for rationale
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ _pending_by_session: dict[str, str] = {}
 _CACHE_TTL_SECONDS = 30.0
 _pivot_cache: dict[str, tuple[float, dict]] = {}
 
-PIVOT_TIMEOUT_SECONDS = 25.0
+PIVOT_TIMEOUT_SECONDS = 45.0  # bumped from 25 — Gemini fallback path needs more headroom
 
 
 def _register_future(request_id: str, session_id: str) -> asyncio.Future:

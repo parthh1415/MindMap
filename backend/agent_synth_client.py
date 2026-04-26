@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 _pending: dict[str, asyncio.Future] = {}
 _pending_lock = asyncio.Lock()
 
-DEFAULT_TIMEOUT_SECONDS = 25.0
+DEFAULT_TIMEOUT_SECONDS = 45.0  # bumped from 25 to give Gemini-fallback room when Groq is daily-throttled
 
 
 # ---------------------------------------------------------------------------
