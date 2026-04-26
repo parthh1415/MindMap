@@ -96,26 +96,50 @@ describe("matchTracks", () => {
 
 import { resolveRoles, clearTrackingState } from "@/ar/handTracking";
 
-describe("resolveRoles", () => {
+describe("resolveRoles — instant first-frame role assignment", () => {
   beforeEach(() => clearTrackingState());
 
-  it("does not assign a role with fewer than 3 votes", () => {
-    const tracks = matchTracks([], [mkRaw(100, 100, "Left"), mkRaw(500, 100, "Right")], 1000, 1000);
-    const map = new Map([
-      [tracks[0]!.trackId, mkRaw(100, 100, "Left")],
-      [tracks[1]!.trackId, mkRaw(500, 100, "Right")],
-    ]);
+  it("assigns 'control' to a Left-handed hand on the FIRST frame (no voting delay)", () => {
+    const tracks = matchTracks([], [mkRaw(100, 100, "Left")], 1000, 1000);
+    const map = new Map([[tracks[0]!.trackId, mkRaw(100, 100, "Left")]]);
     const out = resolveRoles(tracks, map);
-    expect(out[0]!.role).toBeNull();
+    expect(out[0]!.role).toBe("control");
   });
 
-  it("locks role after 3 consistent votes", () => {
+  it("assigns 'pointer' to a Right-handed hand on the FIRST frame", () => {
+    const tracks = matchTracks([], [mkRaw(500, 100, "Right")], 1000, 1000);
+    const map = new Map([[tracks[0]!.trackId, mkRaw(500, 100, "Right")]]);
+    const out = resolveRoles(tracks, map);
+    expect(out[0]!.role).toBe("pointer");
+  });
+
+  it("locks role per-track for the lifetime of that track id (no flipping)", () => {
+    // First frame: hand registered as Left → control
     let tracks = matchTracks([], [mkRaw(100, 100, "Left")], 1000, 1000);
-    for (let i = 0; i < 4; i++) {
-      const map = new Map([[tracks[0]!.trackId, mkRaw(100, 100, "Left")]]);
-      tracks = resolveRoles(tracks, map);
-      tracks = matchTracks(tracks, [mkRaw(100 + i, 100, "Left")], 1000, 1000);
-    }
+    let map = new Map([[tracks[0]!.trackId, mkRaw(100, 100, "Left")]]);
+    tracks = resolveRoles(tracks, map);
     expect(tracks[0]!.role).toBe("control");
+
+    // Subsequent frame: model briefly flips handedness to Right (jitter)
+    tracks = matchTracks(tracks, [mkRaw(102, 100, "Right")], 1000, 1000);
+    map = new Map([[tracks[0]!.trackId, mkRaw(102, 100, "Right")]]);
+    tracks = resolveRoles(tracks, map);
+    // Role MUST stay 'control' because we lock per-trackId.
+    expect(tracks[0]!.role).toBe("control");
+  });
+
+  it("clearTrackingState resets locked roles so the next session starts fresh", () => {
+    let tracks = matchTracks([], [mkRaw(100, 100, "Left")], 1000, 1000);
+    let map = new Map([[tracks[0]!.trackId, mkRaw(100, 100, "Left")]]);
+    tracks = resolveRoles(tracks, map);
+    expect(tracks[0]!.role).toBe("control");
+
+    clearTrackingState();
+    // After reset, the SAME-positioned hand (which gets a fresh trackId)
+    // can be assigned a different role if it's now seen as Right.
+    tracks = matchTracks([], [mkRaw(100, 100, "Right")], 1000, 1000);
+    map = new Map([[tracks[0]!.trackId, mkRaw(100, 100, "Right")]]);
+    tracks = resolveRoles(tracks, map);
+    expect(tracks[0]!.role).toBe("pointer");
   });
 });

@@ -113,35 +113,42 @@ export function matchTracks(
   return result;
 }
 
-const handednessVotes = new Map<string, ("Left" | "Right")[]>();
+// Per-track role lock: once we assign control/pointer to a trackId,
+// we keep that role for the lifetime of the track. We DO NOT vote
+// across N frames anymore — that introduced ~100ms of "no role" UX
+// where pinches did nothing. First-frame handedness wins, locked in
+// for the rest of that hand's tracking lifetime.
+const lockedRoles = new Map<string, "control" | "pointer">();
 
 export function resolveRoles(
   tracks: TrackedHand[],
   rawByTrackId: Map<string, RawHand>,
 ): TrackedHand[] {
-  // Vote handedness per track
-  for (const t of tracks) {
-    const raw = rawByTrackId.get(t.trackId);
-    if (!raw) continue;
-    const arr = handednessVotes.get(t.trackId) ?? [];
-    arr.push(raw.handedness);
-    while (arr.length > HANDEDNESS_VOTE_WINDOW) arr.shift();
-    handednessVotes.set(t.trackId, arr);
-  }
-
   return tracks.map((t) => {
-    const arr = handednessVotes.get(t.trackId) ?? [];
-    const left = arr.filter((h) => h === "Left").length;
-    const right = arr.length - left;
-    // Role lock: keep existing role if any, otherwise assign by majority
-    if (t.role) return t;
-    if (arr.length < 3) return t;
-    return { ...t, role: left >= right ? "control" : "pointer" };
+    // Carry forward locked role for this trackId.
+    const locked = lockedRoles.get(t.trackId);
+    if (locked) return { ...t, role: locked };
+
+    // Otherwise assign role from THIS frame's handedness — no voting.
+    // MediaPipe assumes selfie/mirrored input. Our video IS displayed
+    // mirrored via CSS scaleX(-1) but fed UNMIRRORED to MediaPipe
+    // (flipHorizontal: false). MediaPipe's selfie assumption combined
+    // with our unmirrored feed means MediaPipe's "Left" label =
+    // user's actual LEFT hand from the user's POV. So:
+    //   MediaPipe "Left"  → user's left hand  → control role  (rotate/zoom)
+    //   MediaPipe "Right" → user's right hand → pointer role  (activate)
+    // Per the friend's reference spec.
+    const raw = rawByTrackId.get(t.trackId);
+    if (!raw) return t;
+    const role: "control" | "pointer" =
+      raw.handedness === "Left" ? "control" : "pointer";
+    lockedRoles.set(t.trackId, role);
+    return { ...t, role };
   });
 }
 
 export function clearTrackingState(): void {
-  handednessVotes.clear();
+  lockedRoles.clear();
   nextTrackId = 1;
 }
 
