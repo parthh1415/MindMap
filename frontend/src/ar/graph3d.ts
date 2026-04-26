@@ -71,21 +71,59 @@ export interface SceneRefs {
   renderer: THREE.WebGLRenderer;
   graphRoot: THREE.Group;
   nodeMeshes: Map<string, THREE.Mesh>;
-  edgeMeshes: THREE.Mesh[];
-  arrowHelpers: THREE.ArrowHelper[];
+  labelSprites: Map<string, THREE.Sprite>;
+  edgeLines: THREE.LineSegments;
+  edgeLineGeom: THREE.BufferGeometry;
+  edgeLineMat: THREE.LineBasicMaterial;
   sphereGeom: THREE.BufferGeometry;
-  edgeMat: THREE.Material;
 }
 
 // Visual feel — tuned for the Phosphor Dark + volt-yellow brand.
-// Bigger orbs read better at typical zoom; thicker edges make
-// connections legible from a distance.
 const NODE_RADIUS = 0.14;
-const EDGE_RADIUS = 0.025;
 const COLOR_NODE_BASE = 0x6ec1ff;      // cyan glass
 const COLOR_NODE_HOVER = 0xffae3d;     // warm amber
 const COLOR_NODE_ACTIVE = 0xd6ff3a;    // volt yellow (brand)
-const COLOR_EDGE = 0x6ec1ff;           // matches base nodes — connections feel like flowing energy
+// Thin white lines per spec — minimalist, lets the orbs breathe.
+const COLOR_EDGE = 0xffffff;
+const EDGE_OPACITY = 0.45;
+
+/**
+ * Render a node label onto a CanvasTexture so it can be displayed as a
+ * billboard sprite that always faces the camera. Returns the sprite,
+ * positioned slightly above the orb's surface.
+ */
+function makeLabelSprite(label: string): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = "600 56px 'Space Grotesk', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // Soft shadow + bright text so labels read against any backdrop.
+  ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = "#ffffff";
+  // Truncate long labels — graph nodes can be sentences.
+  const maxChars = 28;
+  const text =
+    label.length > maxChars ? label.slice(0, maxChars - 1) + "…" : label;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+  });
+  const sprite = new THREE.Sprite(mat);
+  // Sprite size tuned so a 28-char label is readable at default camera
+  // zoom but doesn't overpower the orb.
+  sprite.scale.set(1.2, 0.3, 1);
+  return sprite;
+}
 
 export function buildScene(
   container: HTMLElement,
@@ -98,15 +136,11 @@ export function buildScene(
   renderer.setSize(w, h);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setClearColor(0x000000, 0);
-  // Tone mapping makes the emissive glow read more like neon than flat color.
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  // Layered lighting: hemisphere for soft sky/ground tint, directional
-  // for highlight angle, point light at center for self-illumination
-  // bias toward the graph's interior.
   scene.add(new THREE.HemisphereLight(0x88aaff, 0x0a0d18, 0.7));
   const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
   keyLight.position.set(3, 5, 5);
@@ -122,14 +156,11 @@ export function buildScene(
   scene.add(graphRoot);
 
   const nodeMeshes = new Map<string, THREE.Mesh>();
-  // Higher-poly sphere — at this radius the silhouette quality matters.
+  const labelSprites = new Map<string, THREE.Sprite>();
   const sphereGeom = new THREE.SphereGeometry(NODE_RADIUS, 48, 48);
   for (const n of nodes) {
     const p = positions[n._id];
     if (!p) continue;
-    // MeshPhysicalMaterial: real PBR with iridescence sheen + small
-    // transmission, giving a translucent glass-orb look. Per-node
-    // material so hover/active state can flip color independently.
     const mat = new THREE.MeshPhysicalMaterial({
       color: COLOR_NODE_BASE,
       emissive: COLOR_NODE_BASE,
@@ -149,39 +180,49 @@ export function buildScene(
     mesh.userData.nodeId = n._id;
     graphRoot.add(mesh);
     nodeMeshes.set(n._id, mesh);
+
+    // Topic label sprite floating slightly above the orb.
+    const sprite = makeLabelSprite(n.label);
+    sprite.position.set(p.x, p.y + NODE_RADIUS + 0.15, p.z);
+    sprite.userData.nodeId = n._id;
+    graphRoot.add(sprite);
+    labelSprites.set(n._id, sprite);
   }
 
-  const edgeMeshes: THREE.Mesh[] = [];
-  const arrowHelpers: THREE.ArrowHelper[] = [];
-  // Edge material: bright cyan with strong emissive so connections
-  // read as glowing tubes against the dark backdrop.
-  const edgeMat = new THREE.MeshStandardMaterial({
-    color: COLOR_EDGE,
-    emissive: COLOR_EDGE,
-    emissiveIntensity: 0.6,
-    roughness: 0.3,
-    metalness: 0.2,
-    transparent: true,
-    opacity: 0.85,
-  });
+  // Edges as ONE LineSegments object — single draw call for all
+  // connections, thin (1px) white lines per the spec.
+  const edgeLineGeom = new THREE.BufferGeometry();
+  const edgeVertices: number[] = [];
   for (const e of edges) {
-    const a = positions[e.source_id], b = positions[e.target_id];
+    const a = positions[e.source_id];
+    const b = positions[e.target_id];
     if (!a || !b) continue;
-    const av = new THREE.Vector3(a.x, a.y, a.z);
-    const bv = new THREE.Vector3(b.x, b.y, b.z);
-    const len = av.distanceTo(bv);
-    const cyl = new THREE.CylinderGeometry(EDGE_RADIUS, EDGE_RADIUS, len, 16);
-    const mesh = new THREE.Mesh(cyl, edgeMat);
-    const mid = av.clone().add(bv).multiplyScalar(0.5);
-    mesh.position.copy(mid);
-    const dirVec = bv.clone().sub(av).normalize();
-    const up = new THREE.Vector3(0, 1, 0);
-    mesh.quaternion.setFromUnitVectors(up, dirVec);
-    graphRoot.add(mesh);
-    edgeMeshes.push(mesh);
+    edgeVertices.push(a.x, a.y, a.z, b.x, b.y, b.z);
   }
+  edgeLineGeom.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(edgeVertices, 3),
+  );
+  const edgeLineMat = new THREE.LineBasicMaterial({
+    color: COLOR_EDGE,
+    transparent: true,
+    opacity: EDGE_OPACITY,
+  });
+  const edgeLines = new THREE.LineSegments(edgeLineGeom, edgeLineMat);
+  graphRoot.add(edgeLines);
 
-  return { scene, camera, renderer, graphRoot, nodeMeshes, edgeMeshes, arrowHelpers, sphereGeom, edgeMat };
+  return {
+    scene,
+    camera,
+    renderer,
+    graphRoot,
+    nodeMeshes,
+    labelSprites,
+    edgeLines,
+    edgeLineGeom,
+    edgeLineMat,
+    sphereGeom,
+  };
 }
 
 export function setNodeColor(
@@ -213,14 +254,17 @@ export function projectNodeToScreen(
 export function disposeScene(refs: SceneRefs): void {
   refs.renderer.dispose();
   refs.renderer.domElement.remove();
+  // Per-node materials (so hover/active state can vary independently).
   refs.nodeMeshes.forEach((m) => {
-    // geometry is shared (refs.sphereGeom) — dispose once below
     (m.material as THREE.Material).dispose();
   });
-  refs.edgeMeshes.forEach((m) => {
-    m.geometry.dispose();
-    // material is shared (refs.edgeMat) — dispose once below
+  // Label sprites carry their own canvas-textured material per node.
+  refs.labelSprites.forEach((s) => {
+    const mat = s.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.dispose();
   });
+  refs.edgeLineGeom.dispose();
+  refs.edgeLineMat.dispose();
   refs.sphereGeom.dispose();
-  refs.edgeMat.dispose();
 }

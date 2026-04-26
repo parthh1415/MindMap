@@ -41,18 +41,19 @@ interface Props {
   onExit: () => void;
 }
 
+type Detector = Awaited<ReturnType<typeof initDetector>>;
+
 /**
- * Hands-only AR view per the reference spec:
- *   - Opens webcam feed in real time
- *   - Tracks hands via @mediapipe/hands (local assets, no TFHub fetch)
- *   - Renders the live graph in a WebGL overlay
- *   - Left hand pinch  = clutch → wrist Δ rotates yaw/pitch, depth Δ zooms
- *   - Right hand pinch = pointer → index fingertip picks node, pinch toggles
- *   - graph container has pointer-events: none — no mouse input
+ * Hands-only AR view.
  *
- * If the camera can't start (cached deny, gesture-required, busy), the
- * full stage becomes a tap-target: clicking anywhere re-attempts the
- * permission flow. No "retry" button — the entire screen IS the button.
+ * Architecture:
+ *  - CameraEffect (mount-only): set up webcam + detector. Survives graph
+ *    changes so we don't re-prompt for permission every time a new node
+ *    arrives during live recording.
+ *  - SceneEffect ([nodes, edges]): build the 3D scene from the live
+ *    graphStore. Disposes + rebuilds when the graph topology changes.
+ *  - RafEffect (mount-only): single render + gesture loop. Reads scene
+ *    and detector from refs so it never restarts.
  */
 export default function ARStage({ onExit }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -64,8 +65,6 @@ export default function ARStage({ onExit }: Props) {
   const [cameraTrying, setCameraTrying] = useState(false);
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
-  // Live debug string showing per-hand role + pinch state — invaluable
-  // when troubleshooting why a gesture doesn't engage.
   const [handsDebug, setHandsDebug] = useState<string>("hands: 0");
   const { fps, tick, latency } = useFps();
 
@@ -74,7 +73,12 @@ export default function ARStage({ onExit }: Props) {
   const activatedNodeIds = useGraphStore((s) => s.activatedNodeIds);
   const toggleActivated = useGraphStore((s) => s.toggleActivated);
 
-  // Refs so the RAF loop reads the latest values without restarting
+  // ── Refs read by the persistent RAF loop ──
+  const detectorRef = useRef<Detector | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const sceneRef = useRef<SceneRefs | null>(null);
+  const overlayCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+
   const toggleActivatedRef = useRef(toggleActivated);
   useEffect(() => {
     toggleActivatedRef.current = toggleActivated;
@@ -85,15 +89,13 @@ export default function ARStage({ onExit }: Props) {
     activatedRef.current = activatedNodeIds;
   }, [activatedNodeIds]);
 
-  const sceneRef = useRef<SceneRefs | null>(null);
-
   const tickRef = useRef(tick);
   useEffect(() => {
     tickRef.current = tick;
   }, [tick]);
 
-  // Exposed by Effect 1; called from the fullscreen tap-target + the
-  // camera-picker dropdown in JSX.
+  // ── Camera setup, exposed via refs so a Retry / Switch button can
+  // call them without re-running the mount effect. ──
   const retryCameraRef = useRef<(() => Promise<void>) | null>(null);
   const switchCameraRef = useRef<((id: string) => Promise<void>) | null>(null);
 
@@ -118,53 +120,14 @@ export default function ARStage({ onExit }: Props) {
     }
   };
 
-  // Effect 1: build scene, set up camera + hand tracking, run RAF loop.
-  // Restarts only when graph topology changes (nodes/edges).
+  // ── CameraEffect: mount-only setup of webcam + detector. ──
   useEffect(() => {
-    let raf = 0;
-    let stream: MediaStream | null = null;
-    let scene: SceneRefs | null = null;
     let cancelled = false;
-    let tracks: TrackedHand[] = [];
-    const gesture = createGestureController();
-
-    const target = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
-    const current = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
-    let highlightedId: string | null = null;
-    let debugFrameCounter = 0;
-
-    let handTrackingReady = false;
-    type Detector = Awaited<ReturnType<typeof initDetector>>;
-    let detector: Detector | null = null;
-    let overlayCtx: CanvasRenderingContext2D | null = null;
-
-    const buildSceneFromStore = () => {
-      const gc = graphContainerRef.current;
-      if (!gc) return false;
-      // Defensive filter — drop edges whose endpoints aren't in the
-      // node set (otherwise d3-force-3d throws "node not found: <id>").
-      const nodeIdSet = new Set(nodes.map((n) => n._id));
-      const layoutNodes = nodes.map((n) => ({ _id: n._id, label: n.label }));
-      const layoutEdges = edges
-        .filter(
-          (e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id),
-        )
-        .map((e) => ({ source_id: e.source_id, target_id: e.target_id }));
-      const dropped = edges.length - layoutEdges.length;
-      if (dropped > 0) {
-        console.warn(
-          `[AR] dropped ${dropped} orphan edge(s) — endpoint id missing from nodes list`,
-        );
-      }
-      const positions = computeLayout(layoutNodes, layoutEdges);
-      scene = buildScene(gc, layoutNodes, layoutEdges, positions);
-      sceneRef.current = scene;
-      return true;
-    };
 
     const setupHandTracking = async (
       requestedDeviceId?: string | null,
     ): Promise<void> => {
+      if (cancelled) return;
       setCameraError(null);
       try {
         const v = videoRef.current;
@@ -174,17 +137,17 @@ export default function ARStage({ onExit }: Props) {
           return;
         }
 
-        // 1. Initial grant — request with explicit deviceId if known,
-        //    otherwise facingMode hint. macOS often picks Continuity
-        //    Camera (your iPhone) over the built-in webcam, which is
-        //    almost never what the user wants for AR.
+        // First grant — request preferred device if known, else
+        // facingMode hint. We re-pick after enumeration.
         const preferredId = requestedDeviceId ?? getPreferredCameraId();
-        stream = await startWebcam(v, preferredId);
+        let stream = await startWebcam(v, preferredId);
+        streamRef.current = stream;
 
-        // 2. Once permission is granted, labels become readable.
-        //    Enumerate, classify, and auto-switch if we landed on
-        //    Continuity but a built-in / external camera exists.
         const list = await listCameras();
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
         setCameras(list);
 
         const currentTrack = stream.getVideoTracks()[0];
@@ -196,23 +159,26 @@ export default function ARStage({ onExit }: Props) {
           currentDeviceId &&
           targetCam.deviceId !== currentDeviceId
         ) {
-          // We're on the wrong camera — restart with the right one.
           stream.getTracks().forEach((t) => t.stop());
           stream = await startWebcam(v, targetCam.deviceId);
+          streamRef.current = stream;
           setPreferredCameraId(targetCam.deviceId);
           setActiveCameraId(targetCam.deviceId);
         } else {
           setActiveCameraId(currentDeviceId ?? targetCam?.deviceId ?? null);
-          // Persist whichever we settled on so next session is
-          // deterministic.
           if (targetCam) setPreferredCameraId(targetCam.deviceId);
         }
 
-        overlay.width = v.videoWidth || 1280;
-        overlay.height = v.videoHeight || 720;
-        detector = await initDetector();
-        overlayCtx = overlay.getContext("2d");
-        handTrackingReady = true;
+        if (cancelled) return;
+        overlay.width = v.videoWidth || 1920;
+        overlay.height = v.videoHeight || 1080;
+        const detector = await initDetector();
+        if (cancelled) {
+          detector.dispose();
+          return;
+        }
+        detectorRef.current = detector;
+        overlayCtxRef.current = overlay.getContext("2d");
         setCameraReady(true);
         setCameraError(null);
         setStatus(
@@ -220,189 +186,226 @@ export default function ARStage({ onExit }: Props) {
         );
       } catch (err) {
         console.warn("[AR] camera unavailable:", err);
-        if (stream) {
-          stream.getTracks().forEach((t) => t.stop());
-          stream = null;
+        const s = streamRef.current;
+        if (s) {
+          s.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
         }
         const v = videoRef.current;
         if (v) v.srcObject = null;
-        handTrackingReady = false;
-        detector = null;
-        overlayCtx = null;
+        detectorRef.current = null;
+        overlayCtxRef.current = null;
         setCameraReady(false);
         setCameraError(describeCameraError(err));
         setStatus("camera blocked — tap anywhere to enable hand tracking");
       }
     };
+
     retryCameraRef.current = () => setupHandTracking();
     switchCameraRef.current = async (deviceId: string) => {
-      // Tear down the current stream + detector first so the new
-      // device gets fresh state.
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop());
-        stream = null;
+      const s = streamRef.current;
+      if (s) {
+        s.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
       }
       const v = videoRef.current;
       if (v) v.srcObject = null;
-      handTrackingReady = false;
-      detector = null;
-      overlayCtx = null;
+      detectorRef.current = null;
+      overlayCtxRef.current = null;
       await disposeDetector();
       await setupHandTracking(deviceId);
     };
 
-    (async () => {
+    // Auto-attempt: if the browser already granted permission, this
+    // returns the stream silently with no prompt. If not (cached deny,
+    // first visit, gesture-required), it throws and the tap-target
+    // overlay shows. Either way no flash.
+    void setupHandTracking();
+
+    return () => {
+      cancelled = true;
+      const s = streamRef.current;
+      const v = videoRef.current;
+      if (v) stopWebcam(s, v);
+      streamRef.current = null;
+      detectorRef.current = null;
+      overlayCtxRef.current = null;
+      void disposeDetector();
+      clearTrackingState();
+    };
+  }, []);
+
+  // ── SceneEffect: rebuild the 3D scene whenever the live graph
+  // changes. Camera + detector untouched. ──
+  useEffect(() => {
+    if (nodes.length === 0) {
+      setStatus(
+        cameraReady
+          ? "no nodes yet — start talking to generate orbs"
+          : "no nodes yet — start talking",
+      );
+      return;
+    }
+    const gc = graphContainerRef.current;
+    if (!gc) return;
+
+    // Defensive filter — drop edges whose endpoints aren't in the
+    // node set (otherwise d3-force-3d throws "node not found: <id>").
+    const nodeIdSet = new Set(nodes.map((n) => n._id));
+    const layoutNodes = nodes.map((n) => ({ _id: n._id, label: n.label }));
+    const layoutEdges = edges
+      .filter((e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id))
+      .map((e) => ({ source_id: e.source_id, target_id: e.target_id }));
+
+    const positions = computeLayout(layoutNodes, layoutEdges);
+    const scene = buildScene(gc, layoutNodes, layoutEdges, positions);
+    sceneRef.current = scene;
+
+    return () => {
+      disposeScene(scene);
+      sceneRef.current = null;
+    };
+    // We intentionally exclude cameraReady — the SceneEffect is
+    // independent of camera state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges]);
+
+  // ── RafEffect: persistent render + gesture loop. Reads everything
+  // from refs so it never restarts. ──
+  useEffect(() => {
+    let raf = 0;
+    let cancelled = false;
+    let tracks: TrackedHand[] = [];
+    const gesture = createGestureController();
+
+    const target = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
+    const current = { yaw: 0, pitch: 0, camZ: CAMERA_Z_DEFAULT };
+    let highlightedId: string | null = null;
+    let debugFrameCounter = 0;
+
+    const loop = async () => {
       if (cancelled) return;
-      if (nodes.length === 0) {
-        setStatus("no nodes — run a session first");
-        return;
-      }
-      if (!buildSceneFromStore()) {
-        setStatus("error: graph container missing");
-        return;
-      }
-      setStatus("rendering — requesting camera…");
+      const t0 = performance.now();
+      const detector = detectorRef.current;
+      const v = videoRef.current;
+      const overlay = overlayRef.current;
+      const overlayCtx = overlayCtxRef.current;
+      const scene = sceneRef.current;
 
-      // Render loop runs unconditionally so the user always sees the
-      // graph spinning slowly at the smoothed pose. Hand-tracking
-      // augments it when the camera is up.
-      const loop = async () => {
-        if (cancelled) return;
-        const t0 = performance.now();
+      if (detector && v && overlay && v.readyState >= 2) {
+        try {
+          const raw = (await detector.estimateHands(v, {
+            flipHorizontal: false,
+            staticImageMode: false,
+          })) as RawHand[];
 
-        if (
-          handTrackingReady &&
-          detector &&
-          videoRef.current &&
-          overlayRef.current
-        ) {
-          const v = videoRef.current;
-          const overlay = overlayRef.current;
-          try {
-            const raw = (await detector.estimateHands(v, {
-              flipHorizontal: false,
-              staticImageMode: false,
-            })) as RawHand[];
-
-            tracks = matchTracks(tracks, raw, v.videoWidth, v.videoHeight);
-            const rawByTrack = new Map<string, RawHand>();
-            for (let i = 0; i < tracks.length && i < raw.length; i++) {
-              rawByTrack.set(tracks[i]!.trackId, raw[i]!);
-            }
-            tracks = resolveRoles(tracks, rawByTrack);
-
-            const frame = gesture.update(tracks);
-            if (frame.rotateDelta) {
-              target.yaw += frame.rotateDelta.yaw;
-              target.pitch += frame.rotateDelta.pitch;
-            }
-            if (frame.zoomDelta != null) {
-              target.camZ = Math.min(
-                CAMERA_Z_MAX,
-                Math.max(CAMERA_Z_MIN, target.camZ + frame.zoomDelta),
-              );
-            }
-
-            if (scene && frame.pointerScreen) {
-              const w = overlay.width;
-              const h = overlay.height;
-              // Mirror correction — overlay is flipped via CSS scaleX(-1)
-              const fx = w - frame.pointerScreen.x;
-              const fy = frame.pointerScreen.y;
-              let bestId: string | null = null;
-              let bestD = POINTER_PICK_RADIUS_PX;
-              scene.nodeMeshes.forEach((mesh, id) => {
-                const p = projectNodeToScreen(mesh, scene!.camera, w, h);
-                const d = Math.hypot(p.x - fx, p.y - fy);
-                if (d < bestD) {
-                  bestD = d;
-                  bestId = id;
-                }
-              });
-
-              if (bestId !== highlightedId) {
-                if (highlightedId) {
-                  const prev = scene.nodeMeshes.get(highlightedId);
-                  if (prev)
-                    setNodeColor(
-                      prev,
-                      activatedRef.current.has(highlightedId)
-                        ? "active"
-                        : "base",
-                    );
-                }
-                if (bestId) {
-                  const m = scene.nodeMeshes.get(bestId);
-                  if (m) setNodeColor(m, "hover");
-                }
-                highlightedId = bestId;
-              }
-            }
-
-            if (frame.pointerPinchEdge === "down" && highlightedId) {
-              toggleActivatedRef.current(highlightedId);
-            }
-
-            if (overlayCtx)
-              drawHands(overlayCtx, tracks, overlay.width, overlay.height);
-
-            // Throttled debug HUD — every 6 frames (~5 Hz at 30fps).
-            // Surfaces role + pinch state so the user can see why a
-            // gesture isn't engaging without opening the console.
-            debugFrameCounter++;
-            if (debugFrameCounter % 6 === 0) {
-              const lines = tracks.map((t) => {
-                const role = t.role ?? "?";
-                const pinch = t.isPinched ? "PINCH" : `${t.pinchStrength.toFixed(2)}`;
-                return `${role}:${pinch}`;
-              });
-              setHandsDebug(
-                tracks.length === 0
-                  ? "hands: 0"
-                  : `hands: ${tracks.length} ${lines.join(" ")}`,
-              );
-            }
-          } catch (err) {
-            console.warn("[AR] hand-track frame error:", err);
+          tracks = matchTracks(tracks, raw, v.videoWidth, v.videoHeight);
+          const rawByTrack = new Map<string, RawHand>();
+          for (let i = 0; i < tracks.length && i < raw.length; i++) {
+            rawByTrack.set(tracks[i]!.trackId, raw[i]!);
           }
+          tracks = resolveRoles(tracks, rawByTrack);
+
+          const frame = gesture.update(tracks);
+          if (frame.rotateDelta) {
+            target.yaw += frame.rotateDelta.yaw;
+            target.pitch += frame.rotateDelta.pitch;
+          }
+          if (frame.zoomDelta != null) {
+            target.camZ = Math.min(
+              CAMERA_Z_MAX,
+              Math.max(CAMERA_Z_MIN, target.camZ + frame.zoomDelta),
+            );
+          }
+
+          if (scene && frame.pointerScreen) {
+            const w = overlay.width;
+            const h = overlay.height;
+            // Overlay is mirrored via CSS scaleX(-1); fingertip needs mirror.
+            const fx = w - frame.pointerScreen.x;
+            const fy = frame.pointerScreen.y;
+            let bestId: string | null = null;
+            let bestD = POINTER_PICK_RADIUS_PX;
+            scene.nodeMeshes.forEach((mesh, id) => {
+              const p = projectNodeToScreen(mesh, scene.camera, w, h);
+              const d = Math.hypot(p.x - fx, p.y - fy);
+              if (d < bestD) {
+                bestD = d;
+                bestId = id;
+              }
+            });
+
+            if (bestId !== highlightedId) {
+              if (highlightedId) {
+                const prev = scene.nodeMeshes.get(highlightedId);
+                if (prev)
+                  setNodeColor(
+                    prev,
+                    activatedRef.current.has(highlightedId)
+                      ? "active"
+                      : "base",
+                  );
+              }
+              if (bestId) {
+                const m = scene.nodeMeshes.get(bestId);
+                if (m) setNodeColor(m, "hover");
+              }
+              highlightedId = bestId;
+            }
+          }
+
+          if (frame.pointerPinchEdge === "down" && highlightedId) {
+            toggleActivatedRef.current(highlightedId);
+          }
+
+          if (overlayCtx)
+            drawHands(overlayCtx, tracks, overlay.width, overlay.height);
+
+          debugFrameCounter++;
+          if (debugFrameCounter % 6 === 0) {
+            const lines = tracks.map((t) => {
+              const role = t.role ?? "?";
+              const pinch = t.isPinched
+                ? "PINCH"
+                : `${t.pinchStrength.toFixed(2)}`;
+              return `${role}:${pinch}`;
+            });
+            setHandsDebug(
+              tracks.length === 0
+                ? "hands: 0"
+                : `hands: ${tracks.length} ${lines.join(" ")}`,
+            );
+          }
+        } catch (err) {
+          console.warn("[AR] hand-track frame error:", err);
         }
+      }
 
-        // Pose smoothing (driven only by gestures — no mouse input)
-        current.yaw += (target.yaw - current.yaw) * ROTATION_DAMPING;
-        current.pitch += (target.pitch - current.pitch) * ROTATION_DAMPING;
-        current.camZ += (target.camZ - current.camZ) * ZOOM_CAMERA_DAMPING;
+      // Pose smoothing always runs (slowly settles into target pose).
+      current.yaw += (target.yaw - current.yaw) * ROTATION_DAMPING;
+      current.pitch += (target.pitch - current.pitch) * ROTATION_DAMPING;
+      current.camZ += (target.camZ - current.camZ) * ZOOM_CAMERA_DAMPING;
 
-        if (scene) {
-          const eul = new THREE.Euler(current.pitch, current.yaw, 0, "YXZ");
-          scene.graphRoot.quaternion.setFromEuler(eul);
-          scene.camera.position.z = current.camZ;
-          scene.camera.lookAt(0, 0, 0);
-          scene.renderer.render(scene.scene, scene.camera);
-        }
+      if (scene) {
+        const eul = new THREE.Euler(current.pitch, current.yaw, 0, "YXZ");
+        scene.graphRoot.quaternion.setFromEuler(eul);
+        scene.camera.position.z = current.camZ;
+        scene.camera.lookAt(0, 0, 0);
+        scene.renderer.render(scene.scene, scene.camera);
+      }
 
-        tickRef.current(performance.now() - t0);
-        raf = requestAnimationFrame(loop);
-      };
-      loop();
-
-      // Try the camera in parallel — if it fails, the JSX shows the
-      // tap-anywhere overlay that calls retryCameraRef on click.
-      await setupHandTracking();
-    })();
+      tickRef.current(performance.now() - t0);
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      if (videoRef.current) stopWebcam(stream, videoRef.current);
-      void disposeDetector();
-      if (scene) disposeScene(scene);
-      sceneRef.current = null;
-      clearTrackingState();
     };
-  }, [nodes, edges]);
+  }, []);
 
-  // Effect 2: repaint node colors when activatedNodeIds changes.
+  // Repaint node colors when activatedNodeIds changes.
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
@@ -433,7 +436,12 @@ export default function ARStage({ onExit }: Props) {
           >
             {cameras.map((c) => (
               <option key={c.deviceId} value={c.deviceId}>
-                {c.label} {c.kind === "continuity" ? "(iPhone)" : c.kind === "builtin" ? "(built-in)" : ""}
+                {c.label}{" "}
+                {c.kind === "continuity"
+                  ? "(iPhone)"
+                  : c.kind === "builtin"
+                    ? "(built-in)"
+                    : ""}
               </option>
             ))}
           </select>

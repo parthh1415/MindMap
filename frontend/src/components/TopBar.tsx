@@ -108,8 +108,12 @@ export function TopBar() {
         <button
           type="button"
           className="topbar-3d"
-          disabled={micActive || !currentSessionId}
-          title={micActive ? "Stop the mic to enter 3D view" : "Open 3D / AR view"}
+          disabled={!currentSessionId}
+          title={
+            micActive
+              ? "Open 3D / AR view (live — orbs appear as you talk)"
+              : "Open 3D / AR view"
+          }
           onClick={() => currentSessionId && navigate("/ar")}
           aria-label="Open 3D AR view"
         >
