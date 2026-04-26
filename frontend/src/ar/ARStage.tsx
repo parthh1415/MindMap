@@ -92,16 +92,28 @@ export default function ARStage({ onExit }: Props) {
         overlay.width = v.videoWidth || 1280;
         overlay.height = v.videoHeight || 720;
 
-        const positions = computeLayout(
-          nodes.map((n) => ({ _id: n._id, label: n.label })),
-          edges.map((e) => ({ source_id: e.source_id, target_id: e.target_id })),
-        );
-        scene = buildScene(
-          gc,
-          nodes.map((n) => ({ _id: n._id, label: n.label })),
-          edges.map((e) => ({ source_id: e.source_id, target_id: e.target_id })),
-          positions,
-        );
+        // Defensive filter: drop edges whose endpoints aren't in the
+        // current node set. Otherwise d3-force-3d's forceLink throws
+        // "node not found: <id>" and the whole AR view dies. This can
+        // happen with orphan edges (source/target node was deleted)
+        // or when the topology agent emitted a label that never got
+        // resolved to a real node id on the backend.
+        const nodeIdSet = new Set(nodes.map((n) => n._id));
+        const layoutNodes = nodes.map((n) => ({ _id: n._id, label: n.label }));
+        const layoutEdges = edges
+          .filter(
+            (e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id),
+          )
+          .map((e) => ({ source_id: e.source_id, target_id: e.target_id }));
+        const droppedEdgeCount = edges.length - layoutEdges.length;
+        if (droppedEdgeCount > 0) {
+          console.warn(
+            `[AR] dropped ${droppedEdgeCount} orphan edge(s) — endpoint id missing from nodes list`,
+          );
+        }
+
+        const positions = computeLayout(layoutNodes, layoutEdges);
+        scene = buildScene(gc, layoutNodes, layoutEdges, positions);
         sceneRef.current = scene;
 
         const detector = await initDetector();
