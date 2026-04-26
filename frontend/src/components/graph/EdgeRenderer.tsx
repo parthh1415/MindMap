@@ -15,12 +15,14 @@ export type GraphEdgeData = {
 };
 
 /**
- * Obsidian-style edge: a single thin uniform-gray line. No gradient,
- * no drop-shadow, no per-edge color.
+ * White connecting line — visually paired with the 3D AR view's white
+ * edges so the two modes feel like the same product. On the dark
+ * canvas a 0.1-opacity gray edge was effectively invisible; the new
+ * default reads at a glance without overpowering the orbs.
  *
- *   default opacity   ≈ 0.10
- *   emphasized        ≈ 0.55
- *   dimmed            ≈ 0.04
+ *   default opacity   ≈ 0.55  (was 0.10)
+ *   emphasized        ≈ 0.85  (was 0.55)
+ *   dimmed            ≈ 0.10  (was 0.04)
  *
  * pathLength still animates 0→1 on mount so new edges feel drawn rather
  * than popped.
@@ -43,17 +45,18 @@ export function EdgeRenderer(props: EdgeProps<GraphEdgeData>) {
         ? "1.5 4"
         : undefined;
 
-  const targetOpacity = data?.dimmed ? 0.04 : data?.emphasized ? 0.55 : 0.1;
+  const targetOpacity = data?.dimmed ? 0.10 : data?.emphasized ? 0.85 : 0.55;
 
   return (
     <>
       <motion.path
         id={id}
         d={edgePath}
-        stroke="rgba(232, 237, 242, 1)"
-        strokeWidth={1}
+        stroke="#ffffff"
+        strokeWidth={1.4}
         fill="none"
         strokeDasharray={dash}
+        strokeLinecap="round"
         markerEnd={markerEnd}
         initial={reduce ? { pathLength: 1, opacity: targetOpacity } : { pathLength: 0, opacity: 0 }}
         animate={{ pathLength: 1, opacity: targetOpacity }}
