@@ -26,18 +26,76 @@ def _app() -> FastAPI:
 
 
 def test_words_to_utterances_groups_by_speaker():
+    # Each speaker run is comfortably above the phantom-absorption
+    # thresholds (≥4 words OR ≥300 ms) so the post-processor leaves
+    # them alone and we can verify the underlying grouping logic.
     words = [
-        {"text": "hello", "speaker": "A", "start": 0, "end": 100},
-        {"text": "world", "speaker": "A", "start": 110, "end": 220},
-        {"text": "hi", "speaker": "B", "start": 250, "end": 320},
-        {"text": "there", "speaker": "B", "start": 330, "end": 420},
-        {"text": "again", "speaker": "A", "start": 500, "end": 600},
+        {"text": "we", "speaker": "A", "start": 0, "end": 80},
+        {"text": "should", "speaker": "A", "start": 90, "end": 200},
+        {"text": "use", "speaker": "A", "start": 210, "end": 300},
+        {"text": "redis", "speaker": "A", "start": 320, "end": 500},
+        {"text": "actually", "speaker": "B", "start": 600, "end": 900},
+        {"text": "postgres", "speaker": "B", "start": 920, "end": 1200},
+        {"text": "scales", "speaker": "B", "start": 1220, "end": 1500},
+        {"text": "fine", "speaker": "B", "start": 1520, "end": 1800},
+        {"text": "fair", "speaker": "A", "start": 2000, "end": 2300},
+        {"text": "point", "speaker": "A", "start": 2320, "end": 2600},
+        {"text": "agreed", "speaker": "A", "start": 2620, "end": 2900},
+        {"text": "moving", "speaker": "A", "start": 2920, "end": 3200},
     ]
     out = diarize_cache.words_to_utterances(words)
     assert len(out) == 3
-    assert out[0] == {"speaker": "A", "text": "hello world", "start": 0, "end": 220}
-    assert out[1] == {"speaker": "B", "text": "hi there", "start": 250, "end": 420}
-    assert out[2] == {"speaker": "A", "text": "again", "start": 500, "end": 600}
+    assert out[0]["speaker"] == "A"
+    assert out[0]["text"] == "we should use redis"
+    assert out[1]["speaker"] == "B"
+    assert out[1]["text"] == "actually postgres scales fine"
+    assert out[2]["speaker"] == "A"
+    assert out[2]["text"] == "fair point agreed moving"
+
+
+def test_absorbs_phantom_speaker_switches():
+    """A 1-word, sub-300ms 'speaker B' island sandwiched between two
+    long 'speaker A' runs is the canonical AssemblyAI failure mode:
+    a single mislabelled filler word creates a phantom third speaker.
+    The absorber merges the island back into the surrounding A run."""
+    words = [
+        {"text": "the", "speaker": "A", "start": 0, "end": 100},
+        {"text": "main", "speaker": "A", "start": 110, "end": 250},
+        {"text": "thing", "speaker": "A", "start": 260, "end": 400},
+        {"text": "we", "speaker": "A", "start": 410, "end": 520},
+        {"text": "want", "speaker": "A", "start": 530, "end": 700},
+        # phantom — 90ms, 1 word, mislabelled
+        {"text": "yeah", "speaker": "B", "start": 710, "end": 800},
+        {"text": "is", "speaker": "A", "start": 820, "end": 950},
+        {"text": "scale", "speaker": "A", "start": 960, "end": 1100},
+        {"text": "first", "speaker": "A", "start": 1110, "end": 1300},
+        {"text": "always", "speaker": "A", "start": 1320, "end": 1500},
+    ]
+    out = diarize_cache.words_to_utterances(words)
+    # Phantom should be folded into the surrounding A run.
+    assert len(out) == 1
+    assert out[0]["speaker"] == "A"
+    assert "yeah" in out[0]["text"]
+
+
+def test_keeps_legitimate_short_back_and_forth():
+    """A short B turn between A and DIFFERENT-speaker C is real
+    back-and-forth dialogue — not a phantom. Must NOT be absorbed."""
+    words = [
+        {"text": "should", "speaker": "A", "start": 0, "end": 200},
+        {"text": "we", "speaker": "A", "start": 210, "end": 350},
+        {"text": "ship", "speaker": "A", "start": 360, "end": 550},
+        {"text": "tonight", "speaker": "A", "start": 560, "end": 800},
+        # short B turn between different speakers — keep it.
+        {"text": "no", "speaker": "B", "start": 820, "end": 950},
+        {"text": "tomorrow", "speaker": "C", "start": 1000, "end": 1300},
+        {"text": "morning", "speaker": "C", "start": 1320, "end": 1600},
+        {"text": "is", "speaker": "C", "start": 1620, "end": 1800},
+        {"text": "safer", "speaker": "C", "start": 1820, "end": 2100},
+    ]
+    out = diarize_cache.words_to_utterances(words)
+    speakers = [u["speaker"] for u in out]
+    assert speakers == ["A", "B", "C"]
 
 
 def test_format_for_prompt_yields_speaker_lines():

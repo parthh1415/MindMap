@@ -28,11 +28,19 @@ class Settings(BaseSettings):
     AGENT_ADDRESSES_PATH: str = "agents/.addresses.json"
 
     # Behavior tunables.
-    # Phase 14 #1: was 1.2 — pulled to 0.3 so the topology agent starts
-    # working WHILE the user is talking, not after they stop. The agent
-    # can handle 3-4 calls/s; partials de-dupe in apply_topology_diff so
-    # repeat dispatches with overlapping node sets don't double-create.
-    TOPOLOGY_DEBOUNCE_SECONDS: float = 0.3
+    # Cadence: roughly one batch of new orbs per 3 seconds of speech.
+    # Was 0.3 (4× per second), but at that rate the agent saw nearly
+    # identical 200-word snapshots between calls and almost always
+    # returned "no new nodes" — burning Groq tokens for nothing. 3 s
+    # gives the speaker enough time to actually express a new idea
+    # before the agent reads the buffer again, so each call lands new
+    # orbs instead of running on stale context.
+    TOPOLOGY_DEBOUNCE_SECONDS: float = 3.0
+    # Don't dispatch unless at least this many *new* words have been
+    # spoken since the last dispatch. Defensive against silence-then-
+    # one-word triggering a wasted call. ~8 words ≈ 3 seconds of
+    # normal conversational speech (140 wpm).
+    TOPOLOGY_MIN_NEW_WORDS: int = 8
     RING_BUFFER_WORDS: int = 200
     ATTENTION_INTERVAL_SECONDS: float = 30.0
     ATTENTION_MIN_MENTIONS: int = 3

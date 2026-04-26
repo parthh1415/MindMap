@@ -154,3 +154,125 @@ describe("DEFAULT_ENDPOINT", () => {
     expect(DEFAULT_ENDPOINT).toBe("wss://streaming.assemblyai.com/v3/ws");
   });
 });
+
+describe("createSpeakerResolver — stable IDs across the session", () => {
+  const { createSpeakerResolver } = __test__;
+
+  it("assigns speaker_0, speaker_1, … in order of first appearance", () => {
+    const r = createSpeakerResolver();
+    // First final turn — raw label "B" speaks first, gets speaker_0.
+    const first = r.resolve(
+      [{ speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }],
+      true,
+    );
+    expect(first).toBe("speaker_0");
+    // Next turn — raw label "A" appears, becomes speaker_1.
+    const second = r.resolve(
+      [{ speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }],
+      true,
+    );
+    expect(second).toBe("speaker_1");
+    // "B" returns — must keep speaker_0 even though chronologically later.
+    const third = r.resolve(
+      [{ speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }],
+      true,
+    );
+    expect(third).toBe("speaker_0");
+  });
+
+  it("sticks to previous speaker on a short interjection from an ALREADY-KNOWN speaker", () => {
+    const r = createSpeakerResolver();
+    // Establish A and B as known speakers first — both have committed.
+    r.resolve(
+      [{ speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }],
+      true,
+    ); // speaker_0 = A
+    r.resolve(
+      [{ speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }],
+      true,
+    ); // speaker_1 = B; lastFinalSpeaker = speaker_1
+    // Now a 2-word interjection mislabelled as A (which IS in the
+    // idMap). Stickiness applies → stays on speaker_1.
+    const out = r.resolve([{ speaker: "A" }, { speaker: "A" }], true);
+    expect(out).toBe("speaker_1");
+  });
+
+  it("commits a brand-new speaker even on a short turn (multi-speaker capture)", () => {
+    const r = createSpeakerResolver();
+    r.resolve(
+      [{ speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }],
+      true,
+    ); // anchor A as speaker_0
+    // Two-word turn from a BRAND-NEW raw label C. Suppressing this would
+    // cap the conversation at A forever; the resolver must register
+    // never-before-seen labels eagerly so 3rd / 4th / Nth speakers can
+    // be detected without waiting for a long turn.
+    const out = r.resolve([{ speaker: "C" }, { speaker: "C" }], true);
+    expect(out).toBe("speaker_1");
+  });
+
+  it("sticks on a contested turn between TWO already-known speakers", () => {
+    const r = createSpeakerResolver();
+    // Pre-establish both A and B.
+    r.resolve(
+      [{ speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }],
+      true,
+    );
+    r.resolve(
+      [{ speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }],
+      true,
+    ); // lastFinalSpeaker = speaker_1
+    // 5/9 ≈ 0.56 split, both labels already known → contested gate fires
+    // → stays on speaker_1.
+    const out = r.resolve(
+      [
+        { speaker: "A" }, { speaker: "A" }, { speaker: "A" },
+        { speaker: "A" }, { speaker: "A" },
+        { speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" },
+      ],
+      true,
+    );
+    expect(out).toBe("speaker_1");
+  });
+
+  it("commits a clear majority of ≥60%", () => {
+    const r = createSpeakerResolver();
+    r.resolve(
+      [{ speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }],
+      true,
+    ); // speaker_0 = A
+    // 7 vs 3 = 70% B → switch to a new stable id.
+    const out = r.resolve(
+      [
+        { speaker: "B" }, { speaker: "B" }, { speaker: "B" },
+        { speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" },
+        { speaker: "A" }, { speaker: "A" }, { speaker: "A" },
+      ],
+      true,
+    );
+    expect(out).toBe("speaker_1");
+  });
+
+  it("partial turns do NOT update the sticky anchor", () => {
+    const r = createSpeakerResolver();
+    r.resolve(
+      [{ speaker: "A" }, { speaker: "A" }, { speaker: "A" }, { speaker: "A" }],
+      true,
+    ); // anchor A as speaker_0
+    // Partial turn with B clearly dominant — resolver returns the B's
+    // stable id but does NOT commit it (state would otherwise pin to B).
+    r.resolve(
+      [{ speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }, { speaker: "B" }],
+      false,
+    );
+    expect(r.state().lastFinalSpeaker).toBe("speaker_0");
+  });
+
+  it("first-ever turn commits even if short", () => {
+    const r = createSpeakerResolver();
+    // No previous anchor → must commit something rather than fall back
+    // to "speaker_default" forever.
+    const out = r.resolve([{ speaker: "A" }], true);
+    expect(out).toBe("speaker_0");
+  });
+});

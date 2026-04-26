@@ -17,6 +17,11 @@ class _SessionBuffer:
     sentences: Deque[str] = field(default_factory=deque)
     last_topology_dispatch: float = 0.0
     pending: bool = False
+    # Total words appended over the session's lifetime (NOT the current
+    # buffer length, which is capped). Used to compute new-word delta
+    # since the last topology dispatch — avoids dispatching on silence.
+    total_words: int = 0
+    total_words_at_last_dispatch: int = 0
 
 
 class RingBuffer:
@@ -38,6 +43,7 @@ class RingBuffer:
         buf = self._get(session_id)
         for w in text.split():
             buf.words.append(w)
+            buf.total_words += 1
             while len(buf.words) > self.max_words:
                 buf.words.popleft()
         # Naïve sentence split for the attention tracker.
@@ -64,12 +70,31 @@ class RingBuffer:
     def session_ids(self) -> list[str]:
         return list(self._sessions.keys())
 
-    def should_dispatch_topology(self, session_id: str, debounce_seconds: float) -> bool:
-        """Return True if enough time has passed since the last dispatch."""
+    def should_dispatch_topology(
+        self,
+        session_id: str,
+        debounce_seconds: float,
+        min_new_words: int = 0,
+    ) -> bool:
+        """Return True if BOTH (a) at least `debounce_seconds` have passed
+        since the last dispatch, AND (b) at least `min_new_words` new words
+        have been appended since the last dispatch. Both gates passed →
+        record this as the new dispatch point and return True; otherwise
+        return False without mutating state.
+
+        The new-words gate prevents wasted LLM calls during silence: a
+        3-second debounce alone would still fire a dispatch if the user
+        was silent for 3 seconds and then said one filler word. Requiring
+        a minimum delta ensures each dispatch sees genuinely new context."""
         buf = self._get(session_id)
         now = time.monotonic()
-        if now - buf.last_topology_dispatch >= debounce_seconds:
+        new_words = buf.total_words - buf.total_words_at_last_dispatch
+        if (
+            now - buf.last_topology_dispatch >= debounce_seconds
+            and new_words >= min_new_words
+        ):
             buf.last_topology_dispatch = now
+            buf.total_words_at_last_dispatch = buf.total_words
             return True
         return False
 
