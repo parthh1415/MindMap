@@ -5,6 +5,7 @@ import type {
   GraphEvent,
   Node as ContractNode,
 } from "@shared/ws_messages";
+import { useSessionStore } from "./sessionStore";
 
 // ─────────────────────────────────────────────────────────────────────
 // Local types
@@ -21,13 +22,20 @@ export type TimelineMode =
   | { active: false }
   | { active: true; atTimestamp: string };
 
+// Hex values mirror tokens.css `--speaker-1..6` so they stay in sync
+// visually. We store hex (not `var(--speaker-N)`) because the new orb
+// gradient uses `color-mix(in srgb, <speakerColor> X%, ...)` and several
+// browsers fail silently when a `var()` is nested inside `color-mix()` —
+// the whole gradient declaration becomes invalid and the orb body
+// renders transparent. With concrete hex strings, `color-mix` resolves
+// reliably everywhere.
 const SPEAKER_TOKENS = [
-  "var(--speaker-1)",
-  "var(--speaker-2)",
-  "var(--speaker-3)",
-  "var(--speaker-4)",
-  "var(--speaker-5)",
-  "var(--speaker-6)",
+  "#ff7849", // copper
+  "#ff4ecd", // magenta
+  "#ffb547", // amber
+  "#5cf2a6", // mint
+  "#4dc6e8", // teal
+  "#b58cff", // violet
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -142,6 +150,13 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
   activatedNodeIds: new Set<string>(),
 
   applyGraphEvent: (e) => {
+    // While the user is scrubbed to a past snapshot, live WebSocket
+    // events would otherwise bleed future data into the frozen view
+    // (a new node arriving from current speech would graft onto the
+    // T-30min snapshot, displaying a graph that never existed at any
+    // real point in time). Drop them; goLive() refetches the
+    // authoritative live state from the server when the user returns.
+    if (get().timelineMode.active) return;
     switch (e.type) {
       case "ghost_node": {
         set((s) => ({
@@ -254,7 +269,58 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
       };
     }),
 
-  goLive: () => set({ timelineMode: { active: false } }),
+  goLive: () => {
+    // Re-fetch the authoritative live graph from the server before
+    // flipping out of timeline mode. The frozen snapshot stays mounted
+    // until the fetch lands, so the user never sees an empty / stale
+    // intermediate state. If the fetch fails (network blip), we still
+    // flip back to live — subsequent WebSocket events will rebuild the
+    // graph organically; better that than stranding the user in a past
+    // view they thought they exited.
+    const apiBase =
+      ((import.meta as unknown as { env?: { VITE_BACKEND_URL?: string } }).env
+        ?.VITE_BACKEND_URL ?? "");
+    const sessionId = useSessionStore.getState().currentSessionId;
+
+    const finalize = (
+      patch: Partial<{
+        nodes: Record<string, ContractNode>;
+        edges: Record<string, ContractEdge>;
+        ghostNodes: Record<string, GhostNode>;
+      }> = {},
+    ) => {
+      set({
+        ...patch,
+        timelineMode: { active: false },
+      });
+    };
+
+    if (!sessionId) {
+      // No session id available — just flip and let WebSocket events
+      // populate the graph as they arrive.
+      finalize();
+      return;
+    }
+    void (async () => {
+      try {
+        const url = `${apiBase}/sessions/${encodeURIComponent(sessionId)}/graph`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`graph ${res.status}`);
+        const data = (await res.json()) as {
+          nodes: ContractNode[];
+          edges: ContractEdge[];
+        };
+        const nodeMap: Record<string, ContractNode> = {};
+        for (const n of data.nodes) nodeMap[n._id] = n;
+        const edgeMap: Record<string, ContractEdge> = {};
+        for (const e of data.edges) edgeMap[e._id] = e;
+        finalize({ nodes: nodeMap, edges: edgeMap, ghostNodes: {} });
+      } catch (err) {
+        console.warn("[graphStore] goLive refetch failed", err);
+        finalize();
+      }
+    })();
+  },
 
   selectNode: (id) => set({ selectedNodeId: id }),
 

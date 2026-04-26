@@ -77,14 +77,47 @@ describe("graphStore", () => {
       speaker_id: "bob",
     });
     const colors = useGraphStore.getState().speakerColors;
-    expect(colors["alice"]).toBe("var(--speaker-1)");
-    expect(colors["bob"]).toBe("var(--speaker-2)");
+    expect(colors["alice"]).toBe("#ff7849");
+    expect(colors["bob"]).toBe("#ff4ecd");
   });
 
   it("goLive clears timeline mode", () => {
     useGraphStore.getState().setTimelineSnapshot([], [], "2024-01-01T00:00:00Z");
     useGraphStore.getState().goLive();
     expect(useGraphStore.getState().timelineMode.active).toBe(false);
+  });
+
+  it("drops live events while in timeline mode (snapshot view stays clean)", () => {
+    // Enter timeline mode with one historical node.
+    useGraphStore.getState().setTimelineSnapshot(
+      [mkNode({ _id: "old", label: "Old" })],
+      [],
+      "2024-01-01T00:00:00Z",
+    );
+    expect(useGraphStore.getState().timelineMode.active).toBe(true);
+
+    // A live event arrives — it MUST NOT graft onto the snapshot view.
+    useGraphStore.getState().applyGraphEvent({
+      type: "node_upsert",
+      session_id: "s",
+      node: mkNode({ _id: "live", label: "Live arrival" }),
+    });
+
+    const nodes = useGraphStore.getState().nodes;
+    expect(nodes["old"]).toBeDefined();
+    expect(nodes["live"]).toBeUndefined();
+  });
+
+  it("applyGraphEvent works normally after goLive", () => {
+    useGraphStore.getState().setTimelineSnapshot([], [], "2024-01-01T00:00:00Z");
+    useGraphStore.getState().goLive();
+    // After flipping back to live, events apply again.
+    useGraphStore.getState().applyGraphEvent({
+      type: "node_upsert",
+      session_id: "s",
+      node: mkNode({ _id: "fresh", label: "Fresh" }),
+    });
+    expect(useGraphStore.getState().nodes["fresh"]).toBeDefined();
   });
 
   it("node_enriched updates info", () => {
