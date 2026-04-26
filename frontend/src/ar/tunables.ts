@@ -29,10 +29,13 @@ export const MAX_ZOOM_STEP = 0.4;
 export const ZOOM_CAMERA_DAMPING = 0.08;
 
 // Pinch detection uses (thumb-tip ↔ index-tip distance) / palm-span.
-// Forgiving thresholds — pinch engages well before fingertips touch
-// and disengages cleanly when they spread apart.
-export const PINCH_ENTER_THRESHOLD = 0.085;
-export const PINCH_EXIT_THRESHOLD = 0.13;
+// Was 0.045/0.06 (friend's spec — fingertips almost touching),
+// then 0.085/0.13 (still too tight for casual pinching),
+// now 0.22/0.34 — engages on a comfortable "okay" gesture and
+// disengages cleanly when fingers fully spread. Real-world casual
+// pinches register reliably at this threshold.
+export const PINCH_ENTER_THRESHOLD = 0.22;
+export const PINCH_EXIT_THRESHOLD = 0.34;
 
 export const CAMERA_Z_MIN = 1.5;
 export const CAMERA_Z_MAX = 12.0;
