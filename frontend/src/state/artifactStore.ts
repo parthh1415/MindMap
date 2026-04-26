@@ -207,6 +207,15 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
   setAtTimestamp: (ts) => set({ atTimestamp: ts }),
 
   openGenerator: async () => {
+    // One-click generation. Classify the graph + transcript to pick the
+    // most-fitting artifact type, then immediately call generate with
+    // that choice. The user no longer has to choose between PRD /
+    // research / decision / brief / etc. — the system reads the
+    // context (nodes, edges, importance, transcript) and picks the
+    // best document type for what the conversation actually was.
+    //
+    // The user can still re-classify into a different type via the
+    // history view + "regenerate as…" if they want to override.
     const sessionId = currentSessionId();
     if (!sessionId) return;
     set({
@@ -241,10 +250,11 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
           typeof data.confidence === "number" ? data.confidence : 0,
         candidates: normalizeCandidates(data.candidates),
       };
-      set({
-        classifyResult: result,
-        phase: "confirming",
-      });
+      // Skip the confirm modal — classifyResult is recorded for any
+      // downstream UI that wants to show "we chose X because…", and
+      // we proceed straight to generation.
+      set({ classifyResult: result });
+      await get().generate();
     } catch (err) {
       set({
         phase: "idle",

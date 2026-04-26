@@ -61,21 +61,35 @@ describe("ArtifactButton", () => {
     expect(screen.getByText("Generate")).toBeInTheDocument();
   });
 
-  it("calls openGenerator on click and posts to /classify-artifact", async () => {
+  it("auto-classifies AND auto-generates on a single click (no confirm modal)", async () => {
     seedNode("n1", "Alpha");
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        session_id: "s",
-        top_choice: "prd",
-        confidence: 0.82,
-        candidates: [
-          { type: "prd", score: 0.82, why: "Feature ideation" },
-          { type: "decision", score: 0.1, why: "Some tradeoffs" },
-          { type: "brief", score: 0.05, why: "Generic fallback" },
-        ],
-      }),
-    });
+    const fetchMock = vi
+      .fn()
+      // 1st call: classify-artifact
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "s",
+          top_choice: "prd",
+          confidence: 0.82,
+          candidates: [
+            { type: "prd", score: 0.82, why: "Feature ideation" },
+            { type: "brief", score: 0.05, why: "Generic fallback" },
+          ],
+        }),
+      })
+      // 2nd call: generate-artifact (auto-fired with the top_choice)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: "s",
+          artifact_type: "prd",
+          title: "Auth PRD",
+          markdown: "# Auth PRD\n\n## Goals\n\nShip OAuth.",
+          files: [],
+          evidence: [],
+        }),
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ArtifactButton />);
@@ -83,25 +97,32 @@ describe("ArtifactButton", () => {
       fireEvent.click(screen.getByTestId("artifact-button"));
     });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${API}/sessions/s/classify-artifact`);
-    expect(init.method).toBe("POST");
+    // Both calls should fire one after the other — classify then generate.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
+    const [classifyUrl] = fetchMock.mock.calls[0];
+    const [generateUrl, generateInit] = fetchMock.mock.calls[1];
+    expect(classifyUrl).toBe(`${API}/sessions/s/classify-artifact`);
+    expect(generateUrl).toBe(`${API}/sessions/s/generate-artifact`);
+    // The generate call uses the classify result's top_choice — context
+    // alone picks the doc type, no user confirmation involved.
+    expect(JSON.parse(generateInit.body).artifact_type).toBe("prd");
+
+    // Final state: ready with the generated artifact loaded.
     await waitFor(() => {
-      expect(useArtifactStore.getState().phase).toBe("confirming");
+      expect(useArtifactStore.getState().phase).toBe("ready");
     });
     expect(useArtifactStore.getState().classifyResult?.top_choice).toBe("prd");
+    expect(useArtifactStore.getState().activeArtifact?.title).toBe("Auth PRD");
   });
 });
 
-describe("ClassifyConfirmModal", () => {
-  it("renders nothing when phase is idle", () => {
-    render(<ClassifyConfirmModal />);
-    expect(screen.queryByTestId("classify-modal")).toBeNull();
-  });
-
-  it("renders top_choice and confidence when phase is confirming", () => {
+describe("ClassifyConfirmModal — suppressed in auto-classify mode", () => {
+  it("never renders, even when phase would historically have shown it", () => {
+    // Pre-auto-classify, this state would have shown the confirm modal.
+    // After the change to skip user confirmation, the modal is hidden
+    // unconditionally — the ArtifactButton's status label is the only
+    // feedback the user gets while classification + generation run.
     useArtifactStore.setState({
       phase: "confirming",
       classifyResult: {
@@ -109,85 +130,11 @@ describe("ClassifyConfirmModal", () => {
         confidence: 0.82,
         candidates: [
           { type: "prd", score: 0.82, why: "Feature ideation conversation." },
-          { type: "decision", score: 0.1, why: "Some tradeoffs discussion." },
-          { type: "brief", score: 0.05, why: "Generic fallback." },
         ],
       },
     });
     render(<ClassifyConfirmModal />);
-    expect(screen.getByTestId("classify-modal")).toBeInTheDocument();
-    expect(screen.getByText("PRD")).toBeInTheDocument();
-    expect(screen.getByTestId("classify-confidence")).toHaveTextContent(
-      "0.82 confidence",
-    );
-    expect(screen.getByText("Feature ideation conversation.")).toBeInTheDocument();
-  });
-
-  it("override picker switches the displayed type", () => {
-    useArtifactStore.setState({
-      phase: "confirming",
-      classifyResult: {
-        top_choice: "prd",
-        confidence: 0.5,
-        candidates: [{ type: "prd", score: 0.5, why: "..." }],
-      },
-    });
-    render(<ClassifyConfirmModal />);
-
-    fireEvent.click(screen.getByTestId("classify-type-pill"));
-    expect(screen.getByTestId("classify-override-menu")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("classify-option-decision"));
-    expect(useArtifactStore.getState().overrideType).toBe("decision");
-    // Pill now shows "Decision Doc" (menu's exit animation may briefly leave
-    // the option label in the DOM, so accept any occurrence ≥ 1).
-    expect(screen.getAllByText("Decision Doc").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId("classify-type-pill").textContent).toContain(
-      "Decision Doc",
-    );
-  });
-
-  it("Generate posts to /generate-artifact with the chosen type and refinement", async () => {
-    useArtifactStore.setState({
-      phase: "confirming",
-      classifyResult: {
-        top_choice: "prd",
-        confidence: 0.82,
-        candidates: [{ type: "prd", score: 0.82, why: "..." }],
-      },
-    });
-
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        session_id: "s",
-        artifact_type: "prd",
-        title: "Auth PRD",
-        markdown: "# Auth PRD\n\n## Goals\n\nShip OAuth.",
-        files: [],
-        evidence: [],
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ClassifyConfirmModal />);
-    fireEvent.change(screen.getByTestId("classify-refinement"), {
-      target: { value: "more technical" },
-    });
-    fireEvent.click(screen.getByTestId("classify-generate"));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${API}/sessions/s/generate-artifact`);
-    expect(init.method).toBe("POST");
-    const body = JSON.parse(init.body);
-    expect(body.artifact_type).toBe("prd");
-    expect(body.refinement_hint).toBe("more technical");
-
-    await waitFor(() => {
-      expect(useArtifactStore.getState().phase).toBe("ready");
-    });
-    expect(useArtifactStore.getState().activeArtifact?.title).toBe("Auth PRD");
+    expect(screen.queryByTestId("classify-modal")).toBeNull();
   });
 });
 
