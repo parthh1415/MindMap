@@ -111,9 +111,18 @@ export function TimelineScrubber() {
     setDragX(null);
   };
 
-  const pillTimeLabel = timelineMode.active
-    ? dayjs(timelineMode.atTimestamp).format("HH:mm:ss")
-    : dayjs(range.end).format("HH:mm:ss");
+  // Show the time the user is currently *targeting* — during a drag,
+  // that's the pixel position; otherwise it's the past snapshot timestamp
+  // (timeline mode) or the live edge.
+  const pillTimeLabel = (() => {
+    if (dragX !== null && trackBounds.width > 0) {
+      const span = Math.max(1, range.end - range.start);
+      const t = range.start + (dragX / trackBounds.width) * span;
+      return dayjs(t).format("HH:mm:ss");
+    }
+    if (timelineMode.active) return dayjs(timelineMode.atTimestamp).format("HH:mm:ss");
+    return dayjs(range.end).format("HH:mm:ss");
+  })();
 
   return (
     <div className="scrubber-shell glass-surface" role="region" aria-label="Timeline scrubber">
