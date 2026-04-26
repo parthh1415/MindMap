@@ -97,14 +97,18 @@ function App() {
       micActivatedAtRef.current = Date.now();
     }
     const t = window.setTimeout(() => {
-      if (
-        !stallToastFiredRef.current &&
-        useNodeList.length === 0 // selector identity check is cheap
-      ) {
+      // Read the LIVE store at fire time — `nodes` from the closure is
+      // stale if the user got real nodes before the timer fired.
+      // (Bug fix: was `useNodeList.length === 0` which is the function's
+      //  parameter count and therefore always 0 → toast always fired.)
+      const liveNodeCount = Object.keys(
+        useGraphStore.getState().nodes,
+      ).length;
+      if (!stallToastFiredRef.current && liveNodeCount === 0) {
         stallToastFiredRef.current = true;
         toast.warning("Live generation throttled", {
           description:
-            "The free LLM tier is rate-limiting the agent. Transcript still records — nodes will land once the quota window resets (~60s).",
+            "The LLM is taking longer than usual. Transcript still records — nodes should land shortly.",
           duration: 8000,
         });
       }
