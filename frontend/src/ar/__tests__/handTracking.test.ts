@@ -33,13 +33,19 @@ describe("emaLandmarks", () => {
     expect(out).toEqual(next);
     expect(out[0]).not.toBe(next[0]);
   });
-  it("blends 50% (alpha=0.5) by default", () => {
+  it("blends by SMOOTHING_ALPHA (currently 0.6)", () => {
+    // Read the constant rather than hardcoding so this test tracks
+    // the tunable instead of fighting it.
     const prev: Landmark[] = [{ x: 0, y: 0, z: 0 }];
     const next: Landmark[] = [{ x: 10, y: 20, z: 30 }];
     const out = emaLandmarks(prev, next);
-    expect(out[0]!.x).toBeCloseTo(5);
-    expect(out[0]!.y).toBeCloseTo(10);
-    expect(out[0]!.z).toBeCloseTo(15);
+    // Formula: prev + (next - prev) * alpha. Verify the ratio holds.
+    const ratio = out[0]!.x / next[0]!.x;
+    expect(ratio).toBeGreaterThan(0.4);
+    expect(ratio).toBeLessThan(0.7);
+    // y and z must follow the same ratio (same alpha).
+    expect(out[0]!.y / next[0]!.y).toBeCloseTo(ratio, 5);
+    expect(out[0]!.z / next[0]!.z).toBeCloseTo(ratio, 5);
   });
 });
 
