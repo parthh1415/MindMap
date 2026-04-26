@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { useGraphStore, useNodeList, useGhostList } from "@/state/graphStore";
 import { useSessionStore } from "@/state/sessionStore";
 import { GraphSocketClient } from "@/ws/graphSocketClient";
@@ -45,6 +46,10 @@ function App() {
   const micActive = useSessionStore((s) => s.micActive);
   const nodes = useNodeList();
   const ghosts = useGhostList();
+  // Track the moment mic flipped on so we can detect "talking but no nodes
+  // for 25s" → very likely an LLM rate limit on the agent side.
+  const micActivatedAtRef = useRef<number | null>(null);
+  const stallToastFiredRef = useRef(false);
 
   // Bootstrap a session id (from URL or by creating one against the backend)
   // and hydrate the graph store from /sessions/{id}/graph.
@@ -72,6 +77,40 @@ function App() {
     mq.addEventListener("change", fn);
     return () => mq.removeEventListener("change", fn);
   }, [setReducedMotion]);
+
+  // Detect "mic on for >25s but zero nodes have arrived" — almost
+  // always means both Groq and Gemini are rate-limited and the topology
+  // agent is silently returning empty diffs. Surface that visibly so
+  // the user isn't staring at a blank canvas wondering what's wrong.
+  useEffect(() => {
+    if (!micActive) {
+      micActivatedAtRef.current = null;
+      stallToastFiredRef.current = false;
+      return;
+    }
+    if (nodes.length > 0) {
+      // Once any node lands, dismiss the stall guard for this session.
+      stallToastFiredRef.current = true;
+      return;
+    }
+    if (micActivatedAtRef.current === null) {
+      micActivatedAtRef.current = Date.now();
+    }
+    const t = window.setTimeout(() => {
+      if (
+        !stallToastFiredRef.current &&
+        useNodeList.length === 0 // selector identity check is cheap
+      ) {
+        stallToastFiredRef.current = true;
+        toast.warning("Live generation throttled", {
+          description:
+            "The free LLM tier is rate-limiting the agent. Transcript still records — nodes will land once the quota window resets (~60s).",
+          duration: 8000,
+        });
+      }
+    }, 25_000);
+    return () => window.clearTimeout(t);
+  }, [micActive, nodes.length]);
 
   // Web Audio click on node creation / merge (toggleable via TopBar).
   useEffect(() => {
