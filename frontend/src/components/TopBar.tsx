@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import { Files, GitBranch, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { Files, GitBranch, Mic, MicOff, Volume2, VolumeX, Box } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useSessionStore } from "@/state/sessionStore";
 import { ArtifactButton } from "@/components/ArtifactButton";
 import { useArtifactStore } from "@/state/artifactStore";
@@ -25,6 +26,8 @@ export function TopBar() {
   const setSidePanelOpen = useSessionStore((s) => s.setSidePanelOpen);
   const soundEnabled = useSessionStore((s) => s.soundEnabled);
   const setSoundEnabled = useSessionStore((s) => s.setSoundEnabled);
+  const navigate = useNavigate();
+  const currentSessionId = useSessionStore((s) => s.currentSessionId);
 
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -102,6 +105,17 @@ export function TopBar() {
         </button>
         <ArtifactHistoryButton />
         <ArtifactButton />
+        <button
+          type="button"
+          className="topbar-3d"
+          disabled={micActive || !currentSessionId}
+          title={micActive ? "Stop the mic to enter 3D view" : "Open 3D / AR view"}
+          onClick={() => currentSessionId && navigate("/ar")}
+          aria-label="Open 3D AR view"
+        >
+          <Box size={14} />
+          <span>3D</span>
+        </button>
         <motion.button
           type="button"
           className={`topbar-mic ${micActive ? "is-live" : ""}`}
@@ -252,6 +266,27 @@ export function TopBar() {
         .topbar-mic-led.is-live {
           background: var(--signature-accent-fg);
           box-shadow: 0 0 6px rgba(0,0,0,0.35) inset;
+        }
+        .topbar-3d {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          border-radius: 6px;
+          background: transparent;
+          border: 1px solid rgba(214, 255, 58, 0.3);
+          color: var(--signature-accent);
+          font-family: var(--font-display);
+          font-size: var(--fs-xs);
+          letter-spacing: 0.08em;
+          cursor: pointer;
+        }
+        .topbar-3d:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
+        .topbar-3d:hover:not(:disabled) {
+          background: rgba(214, 255, 58, 0.08);
         }
       `}</style>
     </header>

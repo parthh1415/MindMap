@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { Routes, Route } from "react-router-dom";
+import ARRoute from "@/ar/ARRoute";
 import { toast } from "sonner";
 import { useGraphStore, useNodeList, useGhostList } from "@/state/graphStore";
 import { useSessionStore } from "@/state/sessionStore";
@@ -39,7 +41,7 @@ import { DevPanel } from "@/lib/devPanel";
  *   └───────────────────────────────┘
  *           SidePanel (slides from right)
  */
-function App() {
+function MainApp() {
   const sessionId = useSessionStore((s) => s.currentSessionId);
   const setReducedMotion = useSessionStore((s) => s.setReducedMotion);
   const soundEnabled = useSessionStore((s) => s.soundEnabled);
@@ -166,6 +168,15 @@ function App() {
         }
       `}</style>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/ar" element={<ARRoute />} />
+      <Route path="*" element={<MainApp />} />
+    </Routes>
   );
 }
 
