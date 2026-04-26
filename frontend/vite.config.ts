@@ -15,6 +15,17 @@ const config: UserConfig & { test?: unknown } = {
         "client",
         "index.ts",
       ),
+      // @tensorflow-models/hand-pose-detection's ESM build statically
+      // imports { Hands } from "@mediapipe/hands", but the real package
+      // is an IIFE with zero ES exports — strict ESM linking fails. We
+      // use runtime: "tfjs" so the imported binding is dead code; this
+      // stub just makes the import resolve.
+      "@mediapipe/hands": path.resolve(
+        __dirname,
+        "src",
+        "ar",
+        "mediapipeHandsStub.ts",
+      ),
     },
   },
   server: {
@@ -24,18 +35,8 @@ const config: UserConfig & { test?: unknown } = {
   optimizeDeps: {
     exclude: [
       "@tensorflow/tfjs-backend-wasm",
-      "@mediapipe/hands",
       "@tensorflow-models/hand-pose-detection",
     ],
-  },
-  build: {
-    rollupOptions: {
-      // @mediapipe/hands ships as a browser global script (not a proper ESM
-      // package). It loads itself from solutionPath at runtime — there is no
-      // bundle-time import to resolve. Mark it external so rolldown doesn't
-      // try to parse its non-ESM exports.
-      external: ["@mediapipe/hands"],
-    },
   },
   test: {
     globals: true,
